@@ -55,6 +55,7 @@ public class HomeActivity extends AppCompatActivity {
     private String currentBrowseTitle;
     private LinearLayout currentBrowseContainer;
     private TextView currentBrowseLoading;
+    private String currentBrowseSingleChildGuid;
     private int libSortColumnIndex = 0; // 0=添加日期, 1=发行日期
     private int libSortOrderIndex = 1;  // 0=升序, 1=降序
 
@@ -87,7 +88,7 @@ public class HomeActivity extends AppCompatActivity {
             if (browseFromLibrary) { renderBrowseGrid(savedBrowseList, savedBrowseTitle); } else { renderGridInContainer(savedBrowseList, savedBrowseTitle, moviesContainer); }
         } else if (currentTab == 1 && savedBrowseGuid != null) {
             browseItemsInContainer(savedBrowseGuid, savedBrowseTitle,
-                    libraryContainer, tvLibraryLoading);
+                    libraryContainer, tvLibraryLoading, currentBrowseSingleChildGuid);
         } else if (currentTab == 0) {
             loadingPreviews = false;
             overviewBuilt = false;
@@ -747,7 +748,8 @@ public class HomeActivity extends AppCompatActivity {
         if (item != null && item.isFolder()) {
             // 文件夹/分类：进入下级目录浏览，而非尝试播放详情
             browseItemsInContainer(item.guid, item.getDisplayTitle(),
-                    currentBrowseContainer, currentBrowseLoading);
+                    currentBrowseContainer, currentBrowseLoading,
+                    (item.singleChildGuid != null && !item.singleChildGuid.isEmpty()) ? item.singleChildGuid : null);
         } else {
             showDetail(item);  // 可播放项走 getPlayInfo
         }
@@ -758,11 +760,12 @@ public class HomeActivity extends AppCompatActivity {
 
 
     private void browseItems(String ancestorGuid, String title) {
-        browseItemsInContainer(ancestorGuid, title, moviesContainer, tvMoviesLoading);
+        browseItemsInContainer(ancestorGuid, title, moviesContainer, tvMoviesLoading, null);
     }
 
     private void browseItemsInContainer(String ancestorGuid, String title,
-                                        LinearLayout container, TextView loadingView) {
+                                        LinearLayout container, TextView loadingView,
+                                        String singleChildGuid) {
         Log.d("Overview", "browseItems: guid=" + ancestorGuid + " title=" + title);
         savedDetailItem = null; savedDetailInfo = null;
         showingEpisodes = false;
@@ -776,6 +779,7 @@ public class HomeActivity extends AppCompatActivity {
         currentBrowseTitle = title;
         currentBrowseContainer = container;
         currentBrowseLoading = loadingView;
+        currentBrowseSingleChildGuid = singleChildGuid;
 
         container.removeAllViews();
         loadingView.setVisibility(View.VISIBLE);
@@ -868,14 +872,9 @@ public class HomeActivity extends AppCompatActivity {
                         apiManager.getApi().getItemList(retryReq).enqueue(this);
                         return;
                     }
-                    TextView e = new TextView(HomeActivity.this);
-                    e.setLayoutParams(new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, 120));
-                    e.setGravity(Gravity.CENTER);
-                    e.setText("暂无内容");
-                    e.setTextColor(0xFF808080);
-                    e.setTextSize(14);
-                    container.addView(e);
+                    // 两次浏览均空：兜底尝试 getPlayInfo（单视频文件夹/合集本身可播放，web 对其直接播放）
+                    Log.d("Overview", "browseItems: 空列表，兜底尝试 getPlayInfo guid=" + ancestorGuid);
+                    tryPlayFolderAsDetail(ancestorGuid, title, container, loadingView);
                 }
             }
             @Override
@@ -884,6 +883,61 @@ public class HomeActivity extends AppCompatActivity {
             }
         };
         apiManager.getApi().getItemList(request).enqueue(browseCb);
+    }
+
+    /** 文件夹浏览两次均为空时的兜底：某些文件夹（单视频文件夹/合集）本身可播放，
+     *  web 对其直接 getPlayInfo 播放。尝试 getPlayInfo，有可播放数据则渲染详情页，否则显示「暂无内容」。 */
+    private void tryPlayFolderAsDetail(String guid, String title, LinearLayout container, View loadingView) {
+        loadingView.setVisibility(View.VISIBLE);
+        Map<String, String> body = new HashMap<>();
+        body.put("item_guid", guid);
+        apiManager.getApi().getPlayInfo(body).enqueue(new Callback<ApiResponse<PlayInfoResponse>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<PlayInfoResponse>> call,
+                                   Response<ApiResponse<PlayInfoResponse>> response) {
+                loadingView.setVisibility(View.GONE);
+                if (response.isSuccessful() && response.body() != null && response.body().code == 0
+                        && response.body().data != null && response.body().data.item != null) {
+                    PlayInfoResponse info = response.body().data;
+                    PlayInfoResponse.ItemInfo it = info.item;
+                    PlayListItem pi = new PlayListItem();
+                    // 叶子文件夹（单视频）后端常经 single_child_guid 指向实际视频；优先用其作为可播放 guid
+                    pi.guid = (currentBrowseSingleChildGuid != null && !currentBrowseSingleChildGuid.isEmpty())
+                            ? currentBrowseSingleChildGuid : (it.guid != null ? it.guid : guid);
+                    pi.title = it.title;
+                    pi.poster = it.poster;
+                    pi.tvTitle = it.tvTitle;
+                    pi.parentTitle = it.parentTitle;
+                    pi.overview = it.overview;
+                    pi.episodeNumber = it.episodeNumber;
+                    pi.voteAverage = it.voteAverage;
+                    pi.duration = it.duration > 0 ? (int) (it.duration / 60) : it.runtime;
+                    pi.ts = info.ts;
+                    pi.parentGuid = info.parentGuid;
+                    pi.type = info.type;
+                    buildDetailPage(pi, info);
+                    return;
+                }
+                showBrowseEmpty(container, loadingView);
+            }
+            @Override
+            public void onFailure(Call<ApiResponse<PlayInfoResponse>> call, Throwable t) {
+                loadingView.setVisibility(View.GONE);
+                showBrowseEmpty(container, loadingView);
+            }
+        });
+    }
+
+    /** 浏览分区最终空列表提示 */
+    private void showBrowseEmpty(LinearLayout container, View loadingView) {
+        loadingView.setVisibility(View.GONE);
+        TextView e = new TextView(HomeActivity.this);
+        e.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 120));
+        e.setGravity(Gravity.CENTER);
+        e.setText("暂无内容");
+        e.setTextColor(0xFF808080);
+        e.setTextSize(14);
+        container.addView(e);
     }
 
     /** 从缓存数据重绘浏览网格（横竖屏切换时调用） */
@@ -950,7 +1004,7 @@ public class HomeActivity extends AppCompatActivity {
     private void reFetchLibraryItems() {
         if (currentBrowseGuid == null || currentBrowseContainer == null) return;
         browseItemsInContainer(currentBrowseGuid, currentBrowseTitle,
-                currentBrowseContainer, currentBrowseLoading);
+                currentBrowseContainer, currentBrowseLoading, currentBrowseSingleChildGuid);
     }
 
     /** 构建排序筛选栏 */
@@ -1938,7 +1992,7 @@ public class HomeActivity extends AppCompatActivity {
         card.setTag(lib);
         card.setOnClickListener(v -> {
             MediaDbItem m = (MediaDbItem) card.getTag();
-            browseItemsInContainer(m.guid, m.title, libraryContainer, tvLibraryLoading);
+            browseItemsInContainer(m.guid, m.title, libraryContainer, tvLibraryLoading, null);
         });
         return card;
     }
