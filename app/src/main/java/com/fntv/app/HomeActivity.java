@@ -34,6 +34,10 @@ public class HomeActivity extends AppCompatActivity {
     private Button tabMovies, tabLibrary, tabSettings;
     private View panelMovies, panelLibrary, panelSettings;
     private LinearLayout moviesContainer, libraryContainer;
+    /** 详情页渲染目标容器：影视标签用 moviesContainer；媒体库标签内（如文件夹兜底）用 libraryContainer，
+     *  避免 buildDetailPage 把详情渲染进被 GONE 的 moviesContainer 导致黑屏。 */
+    private LinearLayout detailContainer;
+    private boolean detailInLibrary = false;
     private TextView tvMoviesLoading, tvLibraryLoading, tvLibraryEmpty;
     private EditText etSearch;
     private TextView tvSection;
@@ -150,6 +154,7 @@ public class HomeActivity extends AppCompatActivity {
         panelSettings = findViewById(R.id.panelSettings);
         moviesContainer = findViewById(R.id.moviesGridContainer);
         libraryContainer = findViewById(R.id.libraryGridContainer);
+        detailContainer = moviesContainer;
         etSearch = findViewById(R.id.etSearch);
         tvMoviesLoading = findViewById(R.id.tvMoviesLoading);
         tvLibraryLoading = findViewById(R.id.tvLibraryLoading);
@@ -904,6 +909,9 @@ public class HomeActivity extends AppCompatActivity {
                     // 叶子文件夹（单视频）后端常经 single_child_guid 指向实际视频；优先用其作为可播放 guid
                     pi.guid = (currentBrowseSingleChildGuid != null && !currentBrowseSingleChildGuid.isEmpty())
                             ? currentBrowseSingleChildGuid : (it.guid != null ? it.guid : guid);
+                    // 媒体库标签内进入的文件夹兜底：详情渲染进可见的 libraryContainer，而非被 GONE 的 moviesContainer
+                    detailInLibrary = browseFromLibrary;
+                    detailContainer = browseFromLibrary ? libraryContainer : moviesContainer;
                     pi.title = it.title;
                     pi.poster = it.poster;
                     pi.tvTitle = it.tvTitle;
@@ -1133,6 +1141,8 @@ public class HomeActivity extends AppCompatActivity {
 
     private void showDetail(PlayListItem item) {
         switchTab(0);
+        detailInLibrary = false;
+        detailContainer = moviesContainer;
         savedBrowseList = null; savedBrowseGuid = null;
         showingOverview = false;
         showingEpisodes = false;
@@ -1165,7 +1175,8 @@ public class HomeActivity extends AppCompatActivity {
     /** 构建详情页（自动适应横竖屏） */
 
     private void buildDetailPage(PlayListItem item, PlayInfoResponse info) {
-        moviesContainer.removeAllViews();
+        detailContainer = detailInLibrary ? libraryContainer : moviesContainer;
+        detailContainer.removeAllViews();
         savedDetailItem = item; savedDetailInfo = info;
 
         boolean isLandscape = getResources().getConfiguration().orientation
@@ -1225,7 +1236,7 @@ public class HomeActivity extends AppCompatActivity {
             svL.addView(contentL);
             rootRow.addView(svL);
 
-            moviesContainer.addView(rootRow);
+            detailContainer.addView(rootRow);
         } else {
             // ====== 竖屏：原布局 ======
             androidx.core.widget.NestedScrollView scrollView = new androidx.core.widget.NestedScrollView(this);
@@ -1254,7 +1265,7 @@ public class HomeActivity extends AppCompatActivity {
             buildDetailContent(content, item, info, epTitle, series, epNum, pUrl);
 
             scrollView.addView(content);
-            moviesContainer.addView(scrollView);
+            detailContainer.addView(scrollView);
         }
     }
 
@@ -1589,7 +1600,8 @@ public class HomeActivity extends AppCompatActivity {
     /** 加载某季的剧集列表（点击季后调用，直接显示剧集） */
     private void loadEpisodesForSeason(String seasonGuid, int seasonNumber, PlayListItem original) {
         showingEpisodes = true;
-        moviesContainer.removeAllViews();
+        detailContainer = detailInLibrary ? libraryContainer : moviesContainer;
+        detailContainer.removeAllViews();
         // 标题
         TextView h = new TextView(this);
         h.setLayoutParams(new LinearLayout.LayoutParams(
@@ -1599,8 +1611,8 @@ public class HomeActivity extends AppCompatActivity {
         h.setTextColor(0xFFEEEEEE);
         h.setTextSize(21);
         h.setTypeface(Typeface.DEFAULT_BOLD);
-        moviesContainer.addView(h);
-        moviesContainer.addView(makeSpacer(8));
+        detailContainer.addView(h);
+        detailContainer.addView(makeSpacer(8));
 
         apiManager.getApi().getEpisodeList(seasonGuid).enqueue(new Callback<ApiResponse<List<PlayListItem>>>() {
             @Override
@@ -1609,8 +1621,8 @@ public class HomeActivity extends AppCompatActivity {
                 if (!response.isSuccessful() || response.body() == null || response.body().code != 0
                         || response.body().data == null || response.body().data.isEmpty()) return;
                 for (PlayListItem ep : response.body().data) {
-                    moviesContainer.addView(makeEpisodeItem(ep, ep.guid.equals(original.guid)));
-                    moviesContainer.addView(makeSpacer(8));
+                    detailContainer.addView(makeEpisodeItem(ep, ep.guid.equals(original.guid)));
+                    detailContainer.addView(makeSpacer(8));
                 }
             }
             @Override public void onFailure(Call<ApiResponse<List<PlayListItem>>> call, Throwable t) {}
@@ -1675,7 +1687,8 @@ public class HomeActivity extends AppCompatActivity {
 
     private void showEpisodes(List<PlayListItem> eps, int sn, PlayListItem original) {
         showingEpisodes = true;
-        moviesContainer.removeAllViews();
+        detailContainer = detailInLibrary ? libraryContainer : moviesContainer;
+        detailContainer.removeAllViews();
 
         // 标题
         TextView h = new TextView(this);
@@ -1685,12 +1698,12 @@ public class HomeActivity extends AppCompatActivity {
         h.setText("第 " + sn + " 季");
         h.setTextColor(0xFFEEEEEE); h.setTextSize(21);
         h.setTypeface(Typeface.DEFAULT_BOLD);
-        moviesContainer.addView(h);
-        moviesContainer.addView(makeSpacer(8));
+        detailContainer.addView(h);
+        detailContainer.addView(makeSpacer(8));
 
         for (PlayListItem ep : eps) {
-            moviesContainer.addView(makeEpisodeItem(ep, ep.guid.equals(original.guid)));
-            moviesContainer.addView(makeSpacer(8));
+            detailContainer.addView(makeEpisodeItem(ep, ep.guid.equals(original.guid)));
+            detailContainer.addView(makeSpacer(8));
         }
     }
 
