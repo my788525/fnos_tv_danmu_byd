@@ -1,7 +1,7 @@
 {
-    "versionCode": 21,
-    "versionName": "1.2.1",
-    "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.1/FNTV_byd_v1.2.1.apk",
-    "changelog": "1.优化弹幕偏移设置\n2.新增弹幕列表\n3.点击弹幕显示时间\n4.新增自定义弹幕刷新率\n",
+    "versionCode": 22,
+    "versionName": "1.2.2",
+    "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.2/FNTV_byd_v1.2.2.apk",
+    "changelog": "1.车机版强制 HTTP 直连登录，移除 FN Connect 切换（避免车机 WebView 白屏）\n2.沿用 FnOS 私有 API 客户端，登录后可正常浏览与播放\n",
     "forceUpdate": false
   }
