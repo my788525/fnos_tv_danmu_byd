@@ -1,7 +1,7 @@
 {
-  "versionCode": 27,
-  "versionName": "1.2.7",
-  "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.7/FNTV_byd_v1.2.7.apk",
-  "changelog": "1.播放器手势：屏幕左右横滑拖动进度、左半屏上下滑动调亮度、右半屏上下滑动调音量\n2.播放时自动全屏；点击屏幕唤起底部进度条与设置项；新增「全屏」设置：彻底全屏（隐藏状态栏+DOCK）/保留系统栏全屏\n3.全屏点击屏幕时左上角出现半透明返回按钮，随控制栏一同超时隐藏\n4.支持车机方向盘物理上下键切换上一集/下一集\n5.改用 TextureView 渲染，倒车影像抢占 Surface 时自动保存进度并暂停，退出倒车后恢复原位置续播\n6.新增「失焦自动暂停（倒车兜底）」开关（设置项内，默认关）\n7.修复：多集电视剧（type=TV）点进去显示「暂无内容」——isFolder 曾误判电视剧为文件夹，改为走 getPlayInfo 详情页（与网页一致）\n8.修复：文件夹（单视频文件夹/合集）点进去显示「暂无内容」无法播放——浏览两次为空时兜底调 getPlayInfo，优先用 single_child_guid 作为可播放 guid 渲染详情页/直接播放\n9.修复：媒体库标签内点击文件夹显示「漆黑一片」——详情页原硬编码渲染进被 GONE 隐藏的 moviesContainer，切回影视才显出；改为媒体库内文件夹兜底时渲染进可见的 libraryContainer（新增 detailContainer/detailInLibrary 字段，横竖屏恢复与季集渲染同步重建到正确容器）\n",
+  "versionCode": 28,
+  "versionName": "1.2.8",
+  "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.8/FNTV_byd_v1.2.8.apk",
+  "changelog": "1.播放器手势：屏幕左右横滑拖动进度、左半屏上下滑动调亮度、右半屏上下滑动调音量\n2.播放时自动全屏；点击屏幕唤起底部进度条与设置项；新增「全屏」设置：彻底全屏（隐藏状态栏+DOCK）/保留系统栏全屏\n3.全屏点击屏幕时左上角出现半透明返回按钮，随控制栏一同超时隐藏\n4.支持车机方向盘物理上下键切换上一集/下一集\n5.改用 TextureView 渲染，倒车影像抢占 Surface 时自动保存进度并暂停，退出倒车后恢复原位置续播\n6.新增「失焦自动暂停（倒车兜底）」开关（设置项内，默认关）\n7.修复：多集电视剧（type=TV）点进去显示「暂无内容」\n8.修复：文件夹（单视频文件夹/合集）点进去显示「暂无内容」无法播放\n9.修复：媒体库标签内点击文件夹显示「漆黑一片」——详情页原硬编码渲染进被 GONE 的 moviesContainer，改为渲染进可见的 libraryContainer\n10.修复：媒体库文件夹点进去只显示首个视频——getItemList 浏览类型原只含 Directory，漏掉 FnOS 返回的子文件夹类型 Folder/folder 及 Season/Collection，导致子项被过滤成空列表、误走 getPlayInfo 兜底只渲染首个视频；现补全 Browse 类型（Movie/TV/Directory/Video/Episode/Season/Collection/Folder/folder），文件夹下子文件夹与视频现在能正常列出并可继续下钻\n",
   "forceUpdate": false
 }

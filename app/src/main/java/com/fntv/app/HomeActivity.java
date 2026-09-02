@@ -38,6 +38,12 @@ public class HomeActivity extends AppCompatActivity {
      *  避免 buildDetailPage 把详情渲染进被 GONE 的 moviesContainer 导致黑屏。 */
     private LinearLayout detailContainer;
     private boolean detailInLibrary = false;
+    /** 媒体库/文件夹浏览请求的全部子项类型。
+     *  注意：isFolder() 认 "Directory"/"Folder"/"folder"，但旧浏览请求 tags.type 只含 "Directory"，
+     *  若 FnOS 把子文件夹返回为 type "Folder" 会被过滤→空列表→误走 getPlayInfo 兜底只显示首个视频。
+     *  此处补全 Folder/folder 及 Season/Collection，避免漏类型导致返回空。 */
+    private static final List<String> BROWSE_TYPES = Arrays.asList(
+            "Movie", "TV", "Directory", "Video", "Episode", "Season", "Collection", "Folder", "folder");
     private TextView tvMoviesLoading, tvLibraryLoading, tvLibraryEmpty;
     private EditText etSearch;
     private TextView tvSection;
@@ -793,8 +799,7 @@ public class HomeActivity extends AppCompatActivity {
         String sortType = libSortOrderIndex == 0 ? "ASC" : "DESC";
         final boolean[] browseRetried = {false};
         ItemListRequest request = new ItemListRequest(ancestorGuid,
-                Arrays.asList("Movie", "TV", "Directory", "Video"),
-                true, sortColumn, sortType, 50);
+                BROWSE_TYPES, true, sortColumn, sortType, 50);
         Callback<ApiResponse<ItemListResponse>> browseCb = new Callback<ApiResponse<ItemListResponse>>() {
             @Override
             public void onResponse(Call<ApiResponse<ItemListResponse>> call,
@@ -808,7 +813,12 @@ public class HomeActivity extends AppCompatActivity {
                     List<PlayListItem> list = response.body().data.list;
                     savedBrowseList = list;
                     int total = response.body().data.total;
-                    Log.d("Overview", "browseItems: got " + list.size() + " items, total=" + total);
+                    StringBuilder typeSummary = new StringBuilder();
+                    for (PlayListItem pli : list) {
+                        typeSummary.append(pli.type).append("(").append(pli.title).append(") ");
+                    }
+                    Log.d("Overview", "browseItems: got " + list.size() + " items, total=" + total
+                            + " | types: " + typeSummary.toString());
 
                     TextView h = new TextView(HomeActivity.this);
                     h.setLayoutParams(new LinearLayout.LayoutParams(
@@ -869,16 +879,16 @@ public class HomeActivity extends AppCompatActivity {
                     // 回退一次：以 exclude_grouped_video=0（文件夹模式）重试，识别此类媒体库。
                     if (!browseRetried[0] && response.body() != null && response.body().code == 0) {
                         browseRetried[0] = true;
-                        Log.d("Overview", "browseItems: 空列表，回退文件夹模式重试");
+                        Log.d("Overview", "browseItems: 空列表(exclude=1)，回退文件夹模式重试(exclude=0, types=" + BROWSE_TYPES + ") guid=" + ancestorGuid);
                         loadingView.setVisibility(View.VISIBLE);
                         ItemListRequest retryReq = new ItemListRequest(ancestorGuid,
-                                Arrays.asList("Movie", "TV", "Directory", "Video", "Episode"),
-                                false, sortColumn, sortType, 50);
+                                BROWSE_TYPES, false, sortColumn, sortType, 50);
                         apiManager.getApi().getItemList(retryReq).enqueue(this);
                         return;
                     }
                     // 两次浏览均空：兜底尝试 getPlayInfo（单视频文件夹/合集本身可播放，web 对其直接播放）
-                    Log.d("Overview", "browseItems: 空列表，兜底尝试 getPlayInfo guid=" + ancestorGuid);
+                    Log.d("Overview", "browseItems: 两次皆空，兜底尝试 getPlayInfo guid=" + ancestorGuid
+                            + " | lastRespCode=" + (response.body() != null ? response.body().code : "null"));
                     tryPlayFolderAsDetail(ancestorGuid, title, container, loadingView);
                 }
             }
@@ -905,6 +915,11 @@ public class HomeActivity extends AppCompatActivity {
                         && response.body().data != null && response.body().data.item != null) {
                     PlayInfoResponse info = response.body().data;
                     PlayInfoResponse.ItemInfo it = info.item;
+                    Log.d("Overview", "tryPlayFolderAsDetail: getPlayInfo ok guid=" + guid
+                            + " | info.type=" + info.type + " item.guid=" + it.guid
+                            + " numberOfSeasons=" + it.numberOfSeasons + " numberOfEpisodes=" + it.numberOfEpisodes
+                            + " singleChildGuid=" + (currentBrowseSingleChildGuid != null ? currentBrowseSingleChildGuid : "null")
+                            + " parentGuid=" + info.parentGuid + " info.type=" + info.type);
                     PlayListItem pi = new PlayListItem();
                     // 叶子文件夹（单视频）后端常经 single_child_guid 指向实际视频；优先用其作为可播放 guid
                     pi.guid = (currentBrowseSingleChildGuid != null && !currentBrowseSingleChildGuid.isEmpty())
