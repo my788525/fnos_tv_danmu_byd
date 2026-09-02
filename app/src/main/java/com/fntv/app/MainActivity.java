@@ -133,6 +133,8 @@ public class MainActivity extends AppCompatActivity {
         if (btnIdx > 0) {
             loginCard.addView(modeRow, btnIdx);
         }
+        // 车机无可用 WebView，FN Connect OAuth 必白屏 → 仅保留 HTTP 直连，隐藏模式切换
+        modeRow.setVisibility(View.GONE);
 
         // ====== 创建卡片容器 ======
         cardContainer = new FrameLayout(this);
@@ -178,13 +180,12 @@ public class MainActivity extends AppCompatActivity {
         btnFnIdMode.setOnClickListener(modeSwitch);
 
         // ====== 恢复数据 ======
-        isFnIdMode = "fnid".equals(prefs.getString("login_mode", ""));
+        // 车机版：强制 HTTP 直连登录（FN Connect 在车机 WebView 不可用，必白屏）
+        isFnIdMode = false;
+        httpCard.setVisibility(View.VISIBLE);
+        fnidCard.setVisibility(View.GONE);
         loadCardInput();
         updateModeColor();
-        if (isFnIdMode) {
-            httpCard.setVisibility(View.GONE);
-            fnidCard.setVisibility(View.VISIBLE);
-        }
 
         // 登录按钮
         btnLogin.setOnClickListener(new View.OnClickListener() {
