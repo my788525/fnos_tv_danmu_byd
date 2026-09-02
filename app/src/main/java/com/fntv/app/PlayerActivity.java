@@ -114,6 +114,7 @@ public class PlayerActivity extends AppCompatActivity {
     private long savedSurfacePos = 0;
     private boolean surfacePausedByRecycle = false;
     private boolean wasPlayingBeforeRecycle = false;
+    private boolean pausedByLifecycle = false;
     // 横滑进度手势的临时目标位置
     private long gestureTargetPos = -1;
     private final Runnable hideBrightR = () -> { if (tvBrightOverlay != null) tvBrightOverlay.setVisibility(View.GONE); };
@@ -1737,25 +1738,31 @@ public class PlayerActivity extends AppCompatActivity {
     private void showFullscreenDialog() {
         SharedPreferences p = getSharedPreferences("fntv_prefs", MODE_PRIVATE);
         final String[] sel = { p.getString("fullscreen_mode", "immersive") };
+        final boolean[] rp = { p.getBoolean("reverse_pause", false) };
         final android.app.Dialog d = new android.app.Dialog(this, R.style.Theme_FntvApp_Dialog);
         d.setContentView(R.layout.dialog_fullscreen);
         d.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF1A1A1A));
         final ImageView chkImm = d.findViewById(R.id.chk_immersive);
         final ImageView chkSys = d.findViewById(R.id.chk_system);
+        final ImageView chkRp = d.findViewById(R.id.chk_reverse_pause);
         final Runnable upd = () -> {
             if (chkImm != null) chkImm.setVisibility("immersive".equals(sel[0]) ? View.VISIBLE : View.INVISIBLE);
             if (chkSys != null) chkSys.setVisibility("system".equals(sel[0]) ? View.VISIBLE : View.INVISIBLE);
+            if (chkRp != null) chkRp.setVisibility(rp[0] ? View.VISIBLE : View.INVISIBLE);
         };
         upd.run();
         View rowImm = d.findViewById(R.id.row_immersive);
         View rowSys = d.findViewById(R.id.row_system);
+        View rowRp = d.findViewById(R.id.row_reverse_pause);
         if (rowImm != null) rowImm.setOnClickListener(v -> { sel[0] = "immersive"; upd.run(); });
         if (rowSys != null) rowSys.setOnClickListener(v -> { sel[0] = "system"; upd.run(); });
+        if (rowRp != null) rowRp.setOnClickListener(v -> { rp[0] = !rp[0]; upd.run(); });
         View cancel = d.findViewById(R.id.btn_cancel);
         if (cancel != null) cancel.setOnClickListener(v -> d.dismiss());
         View ok = d.findViewById(R.id.btn_ok);
         if (ok != null) ok.setOnClickListener(v -> {
             p.edit().putString("fullscreen_mode", sel[0]).apply();
+            p.edit().putBoolean("reverse_pause", rp[0]).apply();
             applyFullscreenMode();
             d.dismiss();
         });
@@ -1851,6 +1858,24 @@ public class PlayerActivity extends AppCompatActivity {
     @Override protected void onPause() {
         super.onPause();
         restoreOrientation();
+        // 倒车/失焦兜底：开启 reverse_pause 时，暂停并保存进度。
+        // 与 surface 回收逻辑互斥（surface 已接管时不重复处理）；默认关，不影响切后台行为。
+        if (getSharedPreferences("fntv_prefs", MODE_PRIVATE).getBoolean("reverse_pause", false)
+                && player != null && !surfacePausedByRecycle
+                && player.getPlaybackState() == Player.STATE_READY && player.isPlaying()) {
+            savedSurfacePos = player.getCurrentPosition();
+            player.setPlayWhenReady(false);
+            pausedByLifecycle = true;
+        }
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        // 仅在因本兜底暂停、且非 surface 回收接管时，回到前台续播
+        if (pausedByLifecycle && !surfacePausedByRecycle && player != null) {
+            try { player.seekTo(savedSurfacePos); } catch (Exception ignored) {}
+            player.setPlayWhenReady(true);
+            pausedByLifecycle = false;
+        }
     }
     @Override protected void onStop() { super.onStop(); saveProgress(); if (player != null) player.setPlayWhenReady(false); }
     @Override protected void onDestroy() {

@@ -9,7 +9,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="全屏模式"
+        android:text="播放设置"
         android:textColor="#FFF"
         android:textSize="18sp"
         android:textStyle="bold"
@@ -88,6 +88,46 @@
 
         <ImageView
             android:id="@+id/chk_system"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_check_mark"
+            android:visibility="invisible" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/row_reverse_pause"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_chip"
+        android:layout_marginTop="8dp"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="失焦自动暂停（倒车兜底）"
+                android:textColor="#FFF"
+                android:textSize="15sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="开启后切后台/失焦即暂停，返回自动续播；默认关，避免影响正常切后台"
+                android:textColor="#999"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/chk_reverse_pause"
             android:layout_width="22dp"
             android:layout_height="22dp"
             android:src="@drawable/ic_check_mark"
