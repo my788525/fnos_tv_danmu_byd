@@ -12,6 +12,41 @@ DPAD 遥控器友好
     android:background="@color/bg_dark"
     android:orientation="vertical">
 
+    <!-- ========== 顶部标题栏 ========== -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:background="@color/bg_card"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="飞牛影视 BYD"
+            android:textColor="@color/text_white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvSection"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="end"
+            android:text="影视"
+            android:textColor="@color/colorAccent"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider" />
+
     <!-- ========== 内容区域 ========== -->
     <FrameLayout
         android:id="@+id/contentContainer"
@@ -445,7 +480,7 @@ DPAD 遥控器友好
             android:nextFocusRight="@+id/tabLibrary"
             android:text="影视"
             android:textAllCaps="false"
-            android:textColor="@color/text_primary"
+            android:textColor="@color/tab_text"
             android:textSize="13sp" />
 
         <Button
@@ -460,7 +495,7 @@ DPAD 遥控器友好
             android:nextFocusRight="@+id/tabSettings"
             android:text="媒体库"
             android:textAllCaps="false"
-            android:textColor="@color/text_primary"
+            android:textColor="@color/tab_text"
             android:textSize="13sp" />
 
         <Button
@@ -474,7 +509,7 @@ DPAD 遥控器友好
             android:nextFocusLeft="@+id/tabLibrary"
             android:text="设置"
             android:textAllCaps="false"
-            android:textColor="@color/text_primary"
+            android:textColor="@color/tab_text"
             android:textSize="13sp" />
 
     </LinearLayout>

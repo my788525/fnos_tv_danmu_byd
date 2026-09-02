@@ -153,7 +153,6 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
-                    app:buttonTint="@color/colorAccent"
                     android:focusable="false"
                     android:text="记住密码"
                     android:textColor="@color/text_primary"

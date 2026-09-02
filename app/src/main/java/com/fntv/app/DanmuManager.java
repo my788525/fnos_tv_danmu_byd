@@ -302,7 +302,7 @@ public class DanmuManager {
         final float[] rowSpacing = {p.getFloat("danmu_rowspacing", 1.8f)};
         final int[] fps = {p.getInt("danmu_fps", 60)};
 
-        final android.app.Dialog dialog = new android.app.Dialog(activity, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
+        final android.app.Dialog dialog = new android.app.Dialog(activity, R.style.Theme_FntvApp_Dialog);
         dialog.setContentView(R.layout.dialog_danmu_settings);
         dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xDD1A1A1A));
         int screenH = activity.getResources().getDisplayMetrics().heightPixels;
@@ -505,7 +505,7 @@ public class DanmuManager {
     // ========== 弹幕搜索 ==========
 
     private void showDanmuSearch() {
-        final android.app.Dialog dialog = new android.app.Dialog(activity, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
+        final android.app.Dialog dialog = new android.app.Dialog(activity, R.style.Theme_FntvApp_Dialog);
         dialog.setContentView(R.layout.dialog_danmu_search);
         dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xDD1A1A1A));
         dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -636,7 +636,7 @@ public class DanmuManager {
     }
 
     private void showDanmuList() {
-        final android.app.Dialog dialog = new android.app.Dialog(activity, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
+        final android.app.Dialog dialog = new android.app.Dialog(activity, R.style.Theme_FntvApp_Dialog);
         dialog.setContentView(R.layout.dialog_danmu_list);
         dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xDD1A1A1A));
         int screenH = activity.getResources().getDisplayMetrics().heightPixels;
@@ -826,7 +826,7 @@ public class DanmuManager {
                 }
 
                 activity.runOnUiThread(() -> {
-                    final android.app.Dialog dialog = new android.app.Dialog(activity, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
+                    final android.app.Dialog dialog = new android.app.Dialog(activity, R.style.Theme_FntvApp_Dialog);
                     dialog.setContentView(R.layout.dialog_danmu_search);
                     dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xDD1A1A1A));
 

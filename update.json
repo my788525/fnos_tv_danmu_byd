@@ -1,7 +1,7 @@
 {
-    "versionCode": 22,
-    "versionName": "1.2.2",
-    "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.2/FNTV_byd_v1.2.2.apk",
-    "changelog": "1.车机版强制 HTTP 直连登录，移除 FN Connect 切换（避免车机 WebView 白屏）\n2.沿用 FnOS 私有 API 客户端，登录后可正常浏览与播放\n",
+    "versionCode": 23,
+    "versionName": "1.2.3",
+    "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.3/FNTV_byd_v1.2.3.apk",
+    "changelog": "1.修复设置页 checkbox/switch 选中图标在车机 ROM 上显示空白（改用本地矢量控件样式）\n2.修复「保留文件夹层级」媒体库无法识别：点击文件夹进入下级，列表为空时自动回退文件夹模式\n3.界面美化：顶部标题栏、Tab 选中态强调色填充、海报占位渐变\n",
     "forceUpdate": false
   }

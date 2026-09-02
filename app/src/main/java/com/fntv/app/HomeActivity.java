@@ -36,6 +36,7 @@ public class HomeActivity extends AppCompatActivity {
     private LinearLayout moviesContainer, libraryContainer;
     private TextView tvMoviesLoading, tvLibraryLoading, tvLibraryEmpty;
     private EditText etSearch;
+    private TextView tvSection;
     private boolean isSearching = false;
     private TextView tvSettingUsername, tvSettingServer, tvDecoderValue, tvDanmuUrl;
     private Button btnLogout, btnFeedback;
@@ -152,6 +153,7 @@ public class HomeActivity extends AppCompatActivity {
         tvMoviesLoading = findViewById(R.id.tvMoviesLoading);
         tvLibraryLoading = findViewById(R.id.tvLibraryLoading);
         tvLibraryEmpty = findViewById(R.id.tvLibraryEmpty);
+        tvSection = findViewById(R.id.tvSection);
         tvSettingUsername = findViewById(R.id.tvSettingUsername);
         tvSettingServer = findViewById(R.id.tvSettingServer);
         tvDecoderValue = findViewById(R.id.tvDecoderValue);
@@ -213,6 +215,7 @@ public class HomeActivity extends AppCompatActivity {
         tabMovies.setSelected(index == 0);
         tabLibrary.setSelected(index == 1);
         tabSettings.setSelected(index == 2);
+        tvSection.setText(index == 0 ? "影视" : index == 1 ? "媒体库" : "设置");
         if (index == 0) tabMovies.requestFocus();
         else if (index == 1) tabLibrary.requestFocus();
         else tabSettings.requestFocus();
@@ -691,7 +694,7 @@ public class HomeActivity extends AppCompatActivity {
         iv.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 280));
         iv.setScaleType(ImageView.ScaleType.FIT_XY);
-        iv.setBackgroundColor(0xFF333333);
+        iv.setBackgroundResource(R.drawable.bg_poster_ph);
         iv.setCornerRadius(10);
         String imgUrl = makePosterUrl(item.poster);
         if (imgUrl != null) { iv.setTag(imgUrl); }
@@ -741,7 +744,13 @@ public class HomeActivity extends AppCompatActivity {
 
 
     private void onItemClick(PlayListItem item) {
-        showDetail(item);  // 全部走 getPlayInfo
+        if (item != null && item.isFolder()) {
+            // 文件夹/分类：进入下级目录浏览，而非尝试播放详情
+            browseItemsInContainer(item.guid, item.getDisplayTitle(),
+                    currentBrowseContainer, currentBrowseLoading);
+        } else {
+            showDetail(item);  // 可播放项走 getPlayInfo
+        }
     }
 
 
@@ -773,11 +782,11 @@ public class HomeActivity extends AppCompatActivity {
 
         String sortColumn = libSortColumnIndex == 0 ? "create_time" : "release_date";
         String sortType = libSortOrderIndex == 0 ? "ASC" : "DESC";
+        final boolean[] browseRetried = {false};
         ItemListRequest request = new ItemListRequest(ancestorGuid,
                 Arrays.asList("Movie", "TV", "Directory", "Video"),
                 true, sortColumn, sortType, 50);
-        apiManager.getApi().getItemList(request)
-                .enqueue(new Callback<ApiResponse<ItemListResponse>>() {
+        Callback<ApiResponse<ItemListResponse>> browseCb = new Callback<ApiResponse<ItemListResponse>>() {
             @Override
             public void onResponse(Call<ApiResponse<ItemListResponse>> call,
                                    Response<ApiResponse<ItemListResponse>> response) {
@@ -847,6 +856,18 @@ public class HomeActivity extends AppCompatActivity {
                     }
                     new Handler(Looper.getMainLooper()).post(() -> loadImagesLazily(container, 0));
                 } else {
+                    // 保留文件夹层级媒体库：默认 exclude_grouped_video=1 会过滤掉目录结构 → 返回空。
+                    // 回退一次：以 exclude_grouped_video=0（文件夹模式）重试，识别此类媒体库。
+                    if (!browseRetried[0] && response.body() != null && response.body().code == 0) {
+                        browseRetried[0] = true;
+                        Log.d("Overview", "browseItems: 空列表，回退文件夹模式重试");
+                        loadingView.setVisibility(View.VISIBLE);
+                        ItemListRequest retryReq = new ItemListRequest(ancestorGuid,
+                                Arrays.asList("Movie", "TV", "Directory", "Video", "Episode"),
+                                false, sortColumn, sortType, 50);
+                        apiManager.getApi().getItemList(retryReq).enqueue(this);
+                        return;
+                    }
                     TextView e = new TextView(HomeActivity.this);
                     e.setLayoutParams(new LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT, 120));
@@ -861,7 +882,8 @@ public class HomeActivity extends AppCompatActivity {
             public void onFailure(Call<ApiResponse<ItemListResponse>> call, Throwable t) {
                 loadingView.setVisibility(View.GONE);
             }
-        });
+        };
+        apiManager.getApi().getItemList(request).enqueue(browseCb);
     }
 
     /** 从缓存数据重绘浏览网格（横竖屏切换时调用） */
