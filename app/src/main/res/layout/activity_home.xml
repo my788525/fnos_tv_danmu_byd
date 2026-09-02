@@ -337,40 +337,6 @@ DPAD 遥控器友好
 
                         </RelativeLayout>
 
-                        <!-- 弹幕服务器地址 -->
-                        <RelativeLayout
-                            android:id="@+id/rlDanmuSetting"
-                            android:layout_width="match_parent"
-                            android:layout_height="52dp"
-                            android:layout_marginTop="8dp"
-                            android:background="@drawable/bg_input"
-                            android:focusable="true"
-                            android:paddingLeft="12dp"
-                            android:paddingRight="12dp">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_centerVertical="true"
-                                android:text="弹幕服务器"
-                                android:textColor="@color/text_primary"
-                                android:textSize="14sp" />
-
-                            <TextView
-                                android:id="@+id/tvDanmuUrl"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_alignParentRight="true"
-                                android:layout_centerVertical="true"
-                                android:text=""
-                                android:textColor="@color/colorAccent"
-                                android:textSize="12sp"
-                                android:maxWidth="160dp"
-                                android:singleLine="true"
-                                android:ellipsize="end" />
-
-                        </RelativeLayout>
-
                     </LinearLayout>
 
                     <!-- 关于 -->
@@ -415,18 +381,6 @@ DPAD 遥控器友好
                             android:text="检查更新"
                             android:textAllCaps="false"
                             android:textColor="@color/text_white"
-                            android:textSize="14sp" />
-
-                        <Button
-                            android:id="@+id/btnFeedback"
-                            android:layout_width="match_parent"
-                            android:layout_height="48dp"
-                            android:layout_marginTop="10dp"
-                            android:background="@drawable/bg_input"
-                            android:focusable="true"
-                            android:text="问题反馈"
-                            android:textAllCaps="false"
-                            android:textColor="@color/text_primary"
                             android:textSize="14sp" />
 
                     </LinearLayout>

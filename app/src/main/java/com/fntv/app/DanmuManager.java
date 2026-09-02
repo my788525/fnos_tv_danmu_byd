@@ -132,6 +132,14 @@ public class DanmuManager {
         return danmuOn;
     }
 
+    /** 全量禁用弹幕：隐藏弹幕按钮/弹幕层/匹配提示；保留 showDanmuStatus 供 HDR/片头跳过等通用提示复用 */
+    public void disableDanmu() {
+        danmuOn = false;
+        if (danmuView != null) danmuView.setVisibility(View.GONE);
+        if (btnDanmu != null) btnDanmu.setVisibility(View.GONE);
+        if (tvDanmuMatch != null) tvDanmuMatch.setVisibility(View.GONE);
+    }
+
     /** 显示弹幕状态提示（可被外部调用，如 HDR/片头跳过提示） */
     public void showDanmuStatus(String msg) {
         activity.runOnUiThread(() -> {
@@ -168,7 +176,6 @@ public class DanmuManager {
         pendingDanmuTitle = title;
         pendingDanmuGuid = guid;
         if (!danmuOn) {
-            showDanmuStatus("弹幕: 已关闭，" + title + " 待匹配");
             return;
         }
         if (danmuUrl.isEmpty() || title == null) {

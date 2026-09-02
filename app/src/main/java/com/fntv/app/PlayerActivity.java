@@ -39,7 +39,7 @@ public class PlayerActivity extends AppCompatActivity {
     private SimpleExoPlayer player;
     private TextView tvBuffering, tvTime, infoText;
     private SeekBar seekBar;
-    private Button btnPlayPause, btnRewind, btnForward, btnSpeed, btnRatio, btnInfo, btnCloseInfo, btnEpisodeList, btnNextEp, btnBack, btnDanmu, btnHdrToggle, btnQuality;
+    private Button btnPlayPause, btnRewind, btnForward, btnSpeed, btnRatio, btnInfo, btnCloseInfo, btnEpisodeList, btnNextEp, btnBack, btnDanmu, btnHdrToggle, btnQuality, btnPlayCenter;
     private ImageView btnLock;
     private TextView tvTitle, tvDanmuStatus, tvDanmuMatch, tvSpeedHint, infoTextAudio, infoTextExtra;
     private Button btnCloudMode, btnBrightness, btnSkip;
@@ -53,6 +53,9 @@ public class PlayerActivity extends AppCompatActivity {
     private SubtitleMergeOverlay subtitleMerge;
 
     private Handler handler = new Handler(Looper.getMainLooper());
+    // 解码失败自动降级画质：记录起始档位与已尝试次数，避免无限循环
+    private int baseQualityIndex = 1;
+    private int qualityRetry = 0;
     private String itemGuid, baseUrl, itemTitle, itemTV, itemPoster, itemCategory, parentGuid;
     private long itemDuration;
     private FnApiManager apiManager;
@@ -191,6 +194,7 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public String getParentGuid() { return parentGuid; }
         }, danmuView, tvDanmuStatus, tvDanmuMatch, btnDanmu, prefs);
         danmuManager.initFromPrefs();
+        danmuManager.disableDanmu();
 
         // 字幕合并覆层
         FrameLayout playerRoot = (FrameLayout) playerView.getParent();
@@ -223,6 +227,8 @@ public class PlayerActivity extends AppCompatActivity {
         }, btnEpisodeList, btnNextEp);
 
         btnPlayPause.setOnClickListener(v -> togglePlay());
+        btnPlayCenter = findViewById(R.id.btnPlayCenter);
+        if (btnPlayCenter != null) btnPlayCenter.setOnClickListener(v -> togglePlay());
         seekStep = getSharedPreferences("fntv_prefs", MODE_PRIVATE).getInt("seek_step", 10) * 1000;
         btnRewind.setOnClickListener(v -> seekRel(-seekStep));
         btnForward.setOnClickListener(v -> seekRel(seekStep));
@@ -555,7 +561,9 @@ public class PlayerActivity extends AppCompatActivity {
                     if (!seeked && seekTs > 0) { player.seekTo(seekTs); seeked = true; }
                     startSave(); updateTime();
                     if (firstReady) { saveProgress(); showCtrl(true); firstReady = false; }
+                    qualityRetry = 0;
                     btnPlayPause.setText(player.isPlaying() ? "暂停" : "播放");
+                    if (btnPlayCenter != null) btnPlayCenter.setText(player.isPlaying() ? "暂停" : "播放");
                     if (danmuManager != null) danmuManager.onPlayerReady();
                     // HDR 检测（延时等格式就绪）
                     checkHdr();
@@ -601,19 +609,23 @@ public class PlayerActivity extends AppCompatActivity {
                     tc = tc.getCause();
                 }
                 Log.e(TAG, sb2.toString());
-                // 视频/音频解码器崩溃 → 自动切软解重试
-                if (!swDecoderTried && e.getMessage() != null
-                        && (e.getMessage().contains("MediaCodecVideoRenderer")
-                            || e.getMessage().contains("MediaCodecAudioRenderer"))) {
+                // 编解码/渲染/格式类错误（覆盖更广，避免硬解不支持的格式卡死在「加载中」）
+                String errMsgRaw = e.getMessage() != null ? e.getMessage() : "";
+                boolean isCodec = errMsgRaw.contains("MediaCodec") || errMsgRaw.contains("codec")
+                        || errMsgRaw.contains("Decoder") || errMsgRaw.contains("renderer")
+                        || errMsgRaw.contains("Renderer") || errMsgRaw.contains("Format")
+                        || errMsgRaw.contains("format") || errMsgRaw.contains("Sample");
+                // 1) 解码/渲染类错误 → 切软解重试
+                if (!swDecoderTried && isCodec) {
                     swDecoderTried = true;
-                    Log.d(TAG, "硬解失败，切换到软解重试");
+                    Log.d(TAG, "解码/渲染错误，切换到软解重试");
                     getSharedPreferences("fntv_prefs", MODE_PRIVATE)
                             .edit().putString("decoder_mode", "software").apply();
                     isHwDecode = false;
                     handler.post(() -> recreatePlayerWithSwDecoder());
                     return;
                 }
-                // 按响应码切换
+                // 2) 按响应码切换 HLS / 渐进式
                 int code = OkHttpExoDataSource.lastResponseCode;
                 if (code == 200 && !useHls && cloudStreamManager.hasDirectUrl()) {
                     useHls = true;
@@ -632,6 +644,34 @@ public class PlayerActivity extends AppCompatActivity {
                     switchMediaSource(false);
                     return;
                 }
+                // 3) 仍有直链且未试过软解 → 软解兜底（覆盖非编解码类未知错误）
+                if (!swDecoderTried && cloudStreamManager.hasDirectUrl()) {
+                    swDecoderTried = true;
+                    Log.d(TAG, "常规错误，软解兜底重试");
+                    getSharedPreferences("fntv_prefs", MODE_PRIVATE)
+                            .edit().putString("decoder_mode", "software").apply();
+                    isHwDecode = false;
+                    handler.post(() -> recreatePlayerWithSwDecoder());
+                    return;
+                }
+                // 4) 解码/格式不支持 → 自动降级画质（fnOS 多档位直链，BYD 解码器多不支持 4K HEVC，降级到 H.264/低分辨率常可播）
+                if (cloudStreamManager.hasMultipleQualities()
+                        && qualityRetry < cloudStreamManager.getQualityCount() - 1) {
+                    qualityRetry++;
+                    int qc = cloudStreamManager.getQualityCount();
+                    int next = (baseQualityIndex + qualityRetry) % qc;
+                    cloudStreamManager.setQualityIndex(next);
+                    final String lbl = cloudStreamManager.getQualityLabel();
+                    Log.d(TAG, "解码失败，自动降级画质重试 index=" + next + " (" + lbl + ")");
+                    handler.post(() -> {
+                        tvBuffering.setText("加载中...");
+                        tvBuffering.setVisibility(View.VISIBLE);
+                        startPlayback();
+                        android.widget.Toast.makeText(PlayerActivity.this,
+                                "画质不支持，已切换至 " + lbl + " 重试", android.widget.Toast.LENGTH_SHORT).show();
+                    });
+                    return;
+                }
                 if (retryCount < 5 && player != null) {
                     retryCount++;
                     handler.postDelayed(() -> {
@@ -640,6 +680,15 @@ public class PlayerActivity extends AppCompatActivity {
                             player.setPlayWhenReady(true);
                         }
                     }, 2000 * retryCount);
+                } else {
+                    // 重试耗尽仍失败：停止无限「加载中」，给出明确失败提示
+                    Log.e(TAG, "播放彻底失败，放弃重试: " + (e.getMessage() != null ? e.getMessage() : "未知错误"));
+                    tvBuffering.setVisibility(View.GONE);
+                    String errMsg = (e.getMessage() != null ? e.getMessage() : "未知错误");
+                    if (errMsg.length() > 80) errMsg = errMsg.substring(0, 80) + "…";
+                    final String show = errMsg;
+                    handler.post(() -> android.widget.Toast.makeText(
+                            PlayerActivity.this, "播放失败：" + show, android.widget.Toast.LENGTH_LONG).show());
                 }
             }
             @Override public void onCues(java.util.List<com.google.android.exoplayer2.text.Cue> cues) {
@@ -720,6 +769,7 @@ public class PlayerActivity extends AppCompatActivity {
     /** 开始播放（加载到 ExoPlayer） */
     private void startPlayback() {
         if (mediaGuid == null) return;
+        if (qualityRetry == 0) baseQualityIndex = cloudStreamManager.getQualityIndex();
         CloudStreamManager.PlaybackConfig cfg = cloudStreamManager.getPlaybackConfig(baseUrl, mediaGuid);
         OkHttpExoDataSource.setChunkedMode(cfg.chunkedModeSize);
         useHls = cfg.hls;
@@ -808,6 +858,7 @@ public class PlayerActivity extends AppCompatActivity {
                     if (!seeked && seekTs > 0) { player.seekTo(seekTs); seeked = true; }
                     if (firstReady) { showCtrl(true); firstReady = false; }
                     btnPlayPause.setText(player.isPlaying() ? "暂停" : "播放");
+                    if (btnPlayCenter != null) btnPlayCenter.setText(player.isPlaying() ? "暂停" : "播放");
                 } else if (s == Player.STATE_ENDED) {
                     if (episodeManager != null && episodeManager.hasNext()) episodeManager.playNext();
                 }
@@ -851,10 +902,12 @@ public class PlayerActivity extends AppCompatActivity {
         if (player.isPlaying()) {
             player.pause();
             btnPlayPause.setText("播放");
+            if (btnPlayCenter != null) btnPlayCenter.setText("播放");
             if (danmuManager != null) danmuManager.onPlayerPause();
         } else {
             player.play();
             btnPlayPause.setText("暂停");
+            if (btnPlayCenter != null) btnPlayCenter.setText("暂停");
             updateTime();
             if (danmuManager != null) danmuManager.onPlayerReady();
         }
@@ -1182,14 +1235,16 @@ public class PlayerActivity extends AppCompatActivity {
         if (isLocked) {
             btnLock.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
             if (btnBackFloat != null) btnBackFloat.setVisibility(View.INVISIBLE);
+            if (btnPlayCenter != null) btnPlayCenter.setVisibility(View.INVISIBLE);
             return;
         }
         ctrlVis = show;
         controller.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
         topBar.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
         btnLock.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
-        btnDanmu.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+        btnDanmu.setVisibility(View.GONE);
         if (btnBackFloat != null) btnBackFloat.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+        if (btnPlayCenter != null) btnPlayCenter.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
         if (show) {
             updateTitle();
             resetHideTimer();

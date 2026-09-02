@@ -127,8 +127,9 @@ public class CloudStreamManager {
             url = baseUrl + "/v/api/v1/media/range/" + mediaGuid + "?direct_link_quality_index=" + qualityIndex;
             Log.d(TAG, "播放模式: 直链 (NAS代理, index=" + qualityIndex + ") " + url);
         } else {
-            url = baseUrl + "/v/api/v1/media/range/" + mediaGuid;
-            Log.d(TAG, "播放模式: 代理 " + url);
+            // 代理模式也带上质量档位参数：fnOS 同一端点可按档位出转码/低分辨率版本（4K HEVC 不被解码时降级可播）
+            url = baseUrl + "/v/api/v1/media/range/" + mediaGuid + "?direct_link_quality_index=" + qualityIndex;
+            Log.d(TAG, "播放模式: 代理 (带质量档 index=" + qualityIndex + ") " + url);
         }
         boolean hls = url.contains(".m3u8");
         if (!hls && !cloudDirectUrl.isEmpty()) {
@@ -143,6 +144,26 @@ public class CloudStreamManager {
 
     /** 是否处于直链播放模式 */
     public boolean hasDirectUrl() { return !cloudDirectUrl.isEmpty(); }
+
+    /** 当前质量档位数（fnOS 直链多档位） */
+    public int getQualityCount() { return qualityCount; }
+    /** 当前质量索引 */
+    public int getQualityIndex() { return qualityIndex; }
+    /** 是否存在多个可切换质量（用于解码失败自动降级） */
+    public boolean hasMultipleQualities() { return qualityCount > 1; }
+    /** 设置质量索引（自动降级重试时调用） */
+    public void setQualityIndex(int i) {
+        if (i >= 0 && i < qualityCount) {
+            qualityIndex = i;
+            prefs.edit().putInt("cloud_quality_index", i).apply();
+        }
+    }
+    /** 当前质量标签（日志/提示用） */
+    public String getQualityLabel() {
+        if (qualityCount > 0 && qualityIndex < qualityCount && qualityLabels != null)
+            return qualityLabels[qualityIndex];
+        return "";
+    }
 
     /** 注入 ExoPlayer 引用（用于音轨/字幕切换） */
     public void setPlayer(SimpleExoPlayer player) { this.player = player; }

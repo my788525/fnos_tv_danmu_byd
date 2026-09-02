@@ -12,12 +12,13 @@
         android:layout_height="match_parent"
         app:surface_type="texture_view" />
 
-    <!-- 缓冲 -->
+    <!-- 缓冲（上移到中央播放按钮上方，避免与按钮重叠） -->
     <TextView
         android:id="@+id/tvBuffering"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
+        android:layout_marginBottom="150dp"
         android:text="加载中..."
         android:textColor="#80FFFFFF"
         android:textSize="14sp"
@@ -96,15 +97,14 @@
     <ImageButton android:id="@+id/btnBackFloat"
         android:layout_width="46dp"
         android:layout_height="46dp"
-        android:layout_gravity="top|left"
-        android:layout_marginTop="8dp"
+        android:layout_gravity="center_vertical|left"
         android:layout_marginLeft="8dp"
         android:background="@drawable/bg_back_float"
         android:src="@drawable/ic_arrow_left"
         android:scaleType="centerInside"
         android:padding="11dp"
         android:focusable="true"
-        android:nextFocusDown="@+id/btnDanmu"
+        android:nextFocusDown="@+id/seekBar"
         android:visibility="invisible" />
 
     <!-- 弹幕层（视频上方，控件下方） -->
@@ -112,7 +112,8 @@
         android:id="@+id/danmuView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_gravity="center" />
+        android:layout_gravity="center"
+        android:visibility="gone" />
 
     <!-- 弹幕状态提示（覆盖在视频上） -->
     <TextView
@@ -150,19 +151,32 @@
         android:textSize="16sp"
         android:visibility="gone" />
 
-    <!-- 弹幕开关（左侧中间） -->
+    <!-- 弹幕开关（已隐藏） -->
     <Button android:id="@+id/btnDanmu"
         android:layout_width="40dp"
         android:layout_height="40dp"
         android:layout_gravity="center_vertical|left"
         android:layout_marginLeft="8dp"
         android:background="@drawable/bg_chip"
-       
+        
         android:text="弹"
         android:textColor="#FFF"
         android:textSize="12sp"
         android:focusable="true"
         android:nextFocusDown="@+id/seekBar"
+        android:visibility="gone" />
+
+    <!-- 屏幕正中 播放/暂停（需求F：点击屏幕出现，便于大屏触摸） -->
+    <Button android:id="@+id/btnPlayCenter"
+        android:layout_width="120dp"
+        android:layout_height="80dp"
+        android:layout_gravity="center"
+        android:background="@drawable/bg_chip"
+        android:text="播放"
+        android:textColor="#FFF"
+        android:textSize="18sp"
+        android:focusable="true"
+        android:gravity="center"
         android:visibility="invisible" />
 
     <!-- 锁定按钮（右侧中间） -->
