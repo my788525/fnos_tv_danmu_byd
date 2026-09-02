@@ -27,13 +27,12 @@ public class UpdateManager {
     private final Button btnCheckUpdate;
     private final int currentVersionCode;
 
-    /** 更新源（按优先级） */
+    /** 更新源（按优先级，均指向本仓库 my788525/fnos_tv_danmu_byd） */
     private static final String[] UPDATE_URLS = {
-            "https://raw.giteeusercontent.com/coffee710/fntv/raw/master/update.json",
-            "https://jsd.onmicrosoft.cn/gh/rgcaafe/fnos_tv_danmu@master/update.json",
-            "https://cdn.jsdelivr.net/gh/rgcaafe/fnos_tv_danmu@master/update.json",
-            "https://fastly.jsdelivr.net/gh/rgcaafe/fnos_tv_danmu@master/update.json",
-            "https://raw.githubusercontent.com/rgcaafe/fnos_tv_danmu/master/update.json"
+            "https://raw.githubusercontent.com/my788525/fnos_tv_danmu_byd/main/update.json",
+            "https://jsd.onmicrosoft.cn/gh/my788525/fnos_tv_danmu_byd@main/update.json",
+            "https://cdn.jsdelivr.net/gh/my788525/fnos_tv_danmu_byd@main/update.json",
+            "https://fastly.jsdelivr.net/gh/my788525/fnos_tv_danmu_byd@main/update.json"
     };
 
     private static final String TAG = "Update";

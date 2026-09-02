@@ -9,13 +9,13 @@
 ## 📥 下载与使用
 
 ### 方式一：直接下载 APK
-从 [Releases](https://github.com/rgcaafe/fnos_tv_danmu/releases) 页面下载最新版本的 APK 安装包，在 Android 电视/手机上安装即可使用。
+从 [Releases](https://github.com/my788525/fnos_tv_danmu_byd/releases) 页面下载最新版本的 APK 安装包，在比亚迪车机/Android 电视/手机上安装即可使用。
 
 ### 方式二：本地构建
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/rgcaafe/fnos_tv_danmu.git
+git clone https://github.com/my788525/fnos_tv_danmu_byd.git
 cd fnos_tv_danmu
 
 # 2. 编译（需要 Android SDK）
