@@ -3,6 +3,12 @@ plugins {
     id 'com.android.application'
 }
 
+def keyProps = new Properties()
+def keyPropsFile = rootProject.file('local.properties')
+if (keyPropsFile.exists()) {
+    keyProps.load(new FileInputStream(keyPropsFile))
+}
+
 android {
     compileSdkVersion 33
 
@@ -29,6 +35,22 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all {
             outputFileName = "FNTV_${variant.buildType.name}_v${variant.versionName}_${generateTime()}.apk"
+        }
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(keyProps['RELEASE_STORE_FILE'])
+            storePassword keyProps['RELEASE_STORE_PASSWORD']
+            keyAlias keyProps['RELEASE_KEY_ALIAS']
+            keyPassword keyProps['RELEASE_KEY_PASSWORD']
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
         }
     }
 }
