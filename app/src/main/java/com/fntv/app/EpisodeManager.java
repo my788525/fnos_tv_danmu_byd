@@ -49,6 +49,11 @@ public class EpisodeManager {
         return episodeList != null && currentEpIndex >= 0 && currentEpIndex < episodeList.size() - 1;
     }
 
+    /** 是否有上一集 */
+    public boolean hasPrev() {
+        return episodeList != null && currentEpIndex > 0 && currentEpIndex < episodeList.size();
+    }
+
     /** 是否正在加载 */
     public boolean isLoading() { return loadingEpisodes; }
 
@@ -107,6 +112,17 @@ public class EpisodeManager {
         currentEpIndex++;
         currentGuid = next.guid;
         currentTitle = next.title;
+        updateNextBtn();
+        cb.onSwitchEpisode(currentGuid, currentTitle);
+    }
+
+    /** 播放上一个剧集（方向盘/遥控上键） */
+    public void playPrev() {
+        if (!hasPrev()) return;
+        PlayListItem prev = episodeList.get(currentEpIndex - 1);
+        currentEpIndex--;
+        currentGuid = prev.guid;
+        currentTitle = prev.title;
         updateNextBtn();
         cb.onSwitchEpisode(currentGuid, currentTitle);
     }

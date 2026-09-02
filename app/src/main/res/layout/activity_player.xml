@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <!-- 视频 -->
+    <!-- 视频（TextureView 渲染，配合 SurfaceTextureListener 处理倒车影像抢占） -->
     <com.google.android.exoplayer2.ui.PlayerView
         android:id="@+id/playerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
- />
+        app:surface_type="texture_view" />
 
     <!-- 缓冲 -->
     <TextView
@@ -90,6 +91,21 @@
             android:nextFocusDown="@+id/btnBack"
             android:visibility="gone" />
     </RelativeLayout>
+
+    <!-- 全屏左上角半透明返回按钮（需求 C：点击屏幕时随控制栏一起出现，便于一键返回影片页） -->
+    <ImageButton android:id="@+id/btnBackFloat"
+        android:layout_width="46dp"
+        android:layout_height="46dp"
+        android:layout_gravity="top|left"
+        android:layout_marginTop="8dp"
+        android:layout_marginLeft="8dp"
+        android:background="@drawable/bg_back_float"
+        android:src="@drawable/ic_arrow_left"
+        android:scaleType="centerInside"
+        android:padding="11dp"
+        android:focusable="true"
+        android:nextFocusDown="@+id/btnDanmu"
+        android:visibility="invisible" />
 
     <!-- 弹幕层（视频上方，控件下方） -->
     <com.fntv.app.DanmuView
@@ -344,6 +360,16 @@
                     android:paddingLeft="8dp" android:paddingRight="8dp"
                     android:minWidth="0dp" android:minHeight="0dp"
                     android:visibility="gone" />
+
+                <Button android:id="@+id/btnFullscreen"
+                    android:layout_width="wrap_content" android:layout_height="34dp"
+                    android:background="@drawable/bg_chip" android:text="全屏"
+                    android:textColor="#EEE" android:textSize="12sp"
+                    android:focusable="true" android:gravity="center"
+                    android:paddingLeft="12dp" android:paddingRight="12dp"
+                    android:minWidth="0dp" android:minHeight="0dp"
+                    android:layout_marginLeft="3dp"
+                    android:nextFocusLeft="@+id/btnBrightness" />
 
             </LinearLayout>
 

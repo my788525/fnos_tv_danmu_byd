@@ -15,6 +15,7 @@ import android.view.ViewGroup;
 import android.view.Display;
 import android.view.Window;
 import android.view.WindowManager;
+import android.media.AudioManager;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
 import android.content.pm.ActivityInfo;
@@ -93,6 +94,31 @@ public class PlayerActivity extends AppCompatActivity {
     private java.util.List<StreamResponse.AudioStreamInfo> streamAudioTracks;
     private java.util.List<StreamResponse.SubtitleStreamInfo> streamSubtitleTracks;
 
+    // ========== v1.2.4 新增字段 ==========
+    private AudioManager audioManager;
+    private int maxVolume = 15;
+    private TextView tvVolOverlay, tvBrightOverlay;
+    private ImageButton btnBackFloat;
+    private Button btnFullscreen;
+    // 手势状态
+    private static final int GESTURE_NONE = 0, GESTURE_SCRUB = 1, GESTURE_BRIGHT = 2, GESTURE_VOLUME = 3;
+    private float gestureStartX, gestureStartY;
+    private long gestureStartT;
+    private int gestureMode = GESTURE_NONE;
+    private long gestureStartPos;
+    private int gestureBrightness;
+    private int gestureStartVol;
+    private boolean gestureMoved = false;
+    private boolean longPressing = false;
+    // 倒车/ Surface 回收时的播放位置保存
+    private long savedSurfacePos = 0;
+    private boolean surfacePausedByRecycle = false;
+    private boolean wasPlayingBeforeRecycle = false;
+    // 横滑进度手势的临时目标位置
+    private long gestureTargetPos = -1;
+    private final Runnable hideBrightR = () -> { if (tvBrightOverlay != null) tvBrightOverlay.setVisibility(View.GONE); };
+    private final Runnable hideVolR = () -> { if (tvVolOverlay != null) tvVolOverlay.setVisibility(View.GONE); };
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -118,6 +144,10 @@ public class PlayerActivity extends AppCompatActivity {
         parentGuid = getIntent().getStringExtra("parent_guid");
 
         playerView = findViewById(R.id.playerView);
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (audioManager != null) {
+            maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        }
         tvBuffering = findViewById(R.id.tvBuffering);
         tvTime = findViewById(R.id.tvTime);
         seekBar = findViewById(R.id.seekBar);
@@ -169,57 +199,7 @@ public class PlayerActivity extends AppCompatActivity {
             subtitleMerge.setSubtitleView(playerView.getSubtitleView());
         }
 
-        findViewById(android.R.id.content).setOnTouchListener(new View.OnTouchListener() {
-            private boolean longPressing = false;
-            private android.os.Handler longPressHandler = new android.os.Handler(Looper.getMainLooper());
-            @Override public boolean onTouch(View v, android.view.MotionEvent event) {
-                if (isLocked) {
-                    if (event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
-                        showCtrl(true);
-                    }
-                    return true;
-                }
-                switch (event.getAction()) {
-                    case android.view.MotionEvent.ACTION_DOWN:
-                        longPressing = false;
-                        longPressHandler.postDelayed(() -> {
-                            longPressing = true;
-                            if (player != null) {
-                                speedBeforeLongPress = player.getPlaybackParameters().speed;
-                                player.setPlaybackSpeed(2.0f);
-                                danmuView.setPlaybackSpeed(2.0f);
-                                showCtrl(false);
-                                if (tvSpeedHint != null) {
-                                    tvSpeedHint.setVisibility(View.VISIBLE);
-                                }
-                            }
-                        }, 500);
-                        return true;
-                    case android.view.MotionEvent.ACTION_UP:
-                    case android.view.MotionEvent.ACTION_CANCEL:
-                        longPressHandler.removeCallbacksAndMessages(null);
-                        if (longPressing) {
-                            longPressing = false;
-                            if (player != null) {
-                                player.setPlaybackSpeed(speedBeforeLongPress);
-                                danmuView.setPlaybackSpeed(speedBeforeLongPress);
-                            }
-                            if (tvSpeedHint != null) {
-                                tvSpeedHint.setVisibility(View.GONE);
-                            }
-                            return true;
-                        } else {
-                            if (ctrlVis) {
-                                showCtrl(false);
-                            } else {
-                                showCtrl(true);
-                            }
-                        }
-                        return true;
-                }
-                return false;
-            }
-        });
+        setupGestureListener();
 
         episodeManager = new EpisodeManager(new EpisodeManager.Callback() {
             @Override public String getBaseUrl() { return baseUrl; }
@@ -312,6 +292,14 @@ public class PlayerActivity extends AppCompatActivity {
             }
         }
         btnBack.setOnClickListener(v -> { restoreOrientation(); finish(); });
+        btnBackFloat = findViewById(R.id.btnBackFloat);
+        if (btnBackFloat != null) {
+            btnBackFloat.setOnClickListener(v -> { restoreOrientation(); finish(); });
+        }
+        btnFullscreen = findViewById(R.id.btnFullscreen);
+        if (btnFullscreen != null) {
+            btnFullscreen.setOnClickListener(v -> showFullscreenDialog());
+        }
         btnDanmu.setOnClickListener(v -> danmuManager.showSettings());
         btnLock.setOnClickListener(v -> {
             isLocked = !isLocked;
@@ -473,7 +461,7 @@ public class PlayerActivity extends AppCompatActivity {
         loadPlayInfo();
         // 比亚迪车机：播放器启动即适配当前屏横竖屏状态，不强制横屏/竖屏
         OrientationHelper.lockToCurrentDisplay(this);
-        hideSystemUi();
+        applyFullscreenMode();
 
         // 控制栏隐藏时的进度时间浮层
         tvSeekOverlay = new TextView(this);
@@ -486,6 +474,9 @@ public class PlayerActivity extends AppCompatActivity {
         tvSeekOverlay.setBackgroundColor(0x88000000);
         tvSeekOverlay.setVisibility(View.GONE);
         ((FrameLayout) findViewById(android.R.id.content)).addView(tvSeekOverlay);
+
+        // 亮度/音量手势浮层（左侧亮度，右侧音量）
+        createGestureOverlays();
 
         // 初始焦点给视频区域，始终由 playerView 持有焦点
         playerView.setFocusable(true);
@@ -525,6 +516,7 @@ public class PlayerActivity extends AppCompatActivity {
         playerView.setUseController(false);
         playerView.setShutterBackgroundColor(Color.TRANSPARENT);
         playerView.setKeepScreenOn(true);
+        setupVideoSurfaceListener();
         // 字幕样式：白色文字，透明背景，黑色描边
         com.google.android.exoplayer2.ui.CaptionStyleCompat captionStyle =
                 new com.google.android.exoplayer2.ui.CaptionStyleCompat(
@@ -806,6 +798,7 @@ public class PlayerActivity extends AppCompatActivity {
         playerView.setPlayer(player);
         playerView.setUseController(false);
         playerView.setKeepScreenOn(true);
+        setupVideoSurfaceListener();
         // 重新挂载事件监听（错误处理等）
         player.addListener(new Player.Listener() {
             @Override public void onPlaybackStateChanged(int s) {
@@ -1185,8 +1178,9 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void showCtrl(boolean show) {
-        if (show && isLocked) {
-            btnLock.setVisibility(View.VISIBLE);
+        if (isLocked) {
+            btnLock.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+            if (btnBackFloat != null) btnBackFloat.setVisibility(View.INVISIBLE);
             return;
         }
         ctrlVis = show;
@@ -1194,11 +1188,12 @@ public class PlayerActivity extends AppCompatActivity {
         topBar.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
         btnLock.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
         btnDanmu.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+        if (btnBackFloat != null) btnBackFloat.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
         if (show) {
             updateTitle();
             resetHideTimer();
         }
-        else hideSystemUi();
+        else applyFullscreenMode();
     }
     private void resetHideTimer() {
         handler.removeCallbacks(hideC);
@@ -1454,6 +1449,17 @@ public class PlayerActivity extends AppCompatActivity {
             }
             return true;
         }
+        // 方向盘/媒体物理键：上一集 / 下一集（避免与 UI 方向键导航冲突）
+        if (k == KeyEvent.KEYCODE_MEDIA_PREVIOUS || k == KeyEvent.KEYCODE_MEDIA_REWIND
+                || k == KeyEvent.KEYCODE_CHANNEL_DOWN) {
+            if (episodeManager != null && episodeManager.hasPrev()) episodeManager.playPrev();
+            return true;
+        }
+        if (k == KeyEvent.KEYCODE_MEDIA_NEXT || k == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+                || k == KeyEvent.KEYCODE_CHANNEL_UP) {
+            if (episodeManager != null && episodeManager.hasNext()) episodeManager.playNext();
+            return true;
+        }
         if (ctrlVis) {
             switch (k) {
                 case KeyEvent.KEYCODE_BACK:
@@ -1542,6 +1548,262 @@ public class PlayerActivity extends AppCompatActivity {
                 View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+
+    /** 按保存偏好应用全屏模式：彻底全屏(沉浸隐藏系统栏) / 保留系统栏全屏 */
+    private void applyFullscreenMode() {
+        String mode = getSharedPreferences("fntv_prefs", MODE_PRIVATE)
+                .getString("fullscreen_mode", "immersive");
+        if ("system".equals(mode)) {
+            // 保留车机顶部状态栏 + 底部 DOCK 操作栏
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        } else {
+            hideSystemUi();
+        }
+    }
+
+    /** 创建左侧亮度浮层、右侧音量浮层（随手势显隐） */
+    private void createGestureOverlays() {
+        FrameLayout root = (FrameLayout) findViewById(android.R.id.content);
+        tvBrightOverlay = new TextView(this);
+        tvBrightOverlay.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_VERTICAL | Gravity.LEFT));
+        ((FrameLayout.LayoutParams) tvBrightOverlay.getLayoutParams()).leftMargin = 40;
+        tvBrightOverlay.setPadding(24, 14, 24, 14);
+        tvBrightOverlay.setTextColor(Color.WHITE);
+        tvBrightOverlay.setTextSize(16);
+        tvBrightOverlay.setBackgroundColor(0xBB000000);
+        tvBrightOverlay.setVisibility(View.GONE);
+        root.addView(tvBrightOverlay);
+
+        tvVolOverlay = new TextView(this);
+        tvVolOverlay.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_VERTICAL | Gravity.RIGHT));
+        ((FrameLayout.LayoutParams) tvVolOverlay.getLayoutParams()).rightMargin = 40;
+        tvVolOverlay.setPadding(24, 14, 24, 14);
+        tvVolOverlay.setTextColor(Color.WHITE);
+        tvVolOverlay.setTextSize(16);
+        tvVolOverlay.setBackgroundColor(0xBB000000);
+        tvVolOverlay.setVisibility(View.GONE);
+        root.addView(tvVolOverlay);
+    }
+
+    /** 重写播放器触摸手势：横滑=进度，左半屏竖滑=亮度，右半屏竖滑=音量，轻点=切换控制栏，长按=2倍速 */
+    private void setupGestureListener() {
+        final float MOVE_THRESHOLD = 12f;
+        final android.os.Handler longPressHandler = new android.os.Handler(Looper.getMainLooper());
+        final Runnable longPressTask = () -> {
+            longPressing = true;
+            if (player != null && player.getPlaybackState() == Player.STATE_READY) {
+                speedBeforeLongPress = player.getPlaybackParameters().speed;
+                player.setPlaybackSpeed(2.0f);
+                danmuView.setPlaybackSpeed(2.0f);
+                showCtrl(false);
+                if (tvSpeedHint != null) tvSpeedHint.setVisibility(View.VISIBLE);
+            }
+        };
+        findViewById(android.R.id.content).setOnTouchListener((v, event) -> {
+            if (isLocked) {
+                if (event.getAction() == android.view.MotionEvent.ACTION_DOWN) showCtrl(true);
+                return true;
+            }
+            switch (event.getAction()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    longPressing = false;
+                    gestureMoved = false;
+                    gestureMode = GESTURE_NONE;
+                    gestureStartX = event.getX();
+                    gestureStartY = event.getY();
+                    gestureStartT = System.currentTimeMillis();
+                    if (player != null) gestureStartPos = player.getCurrentPosition();
+                    gestureBrightness = getSharedPreferences("fntv_prefs", MODE_PRIVATE)
+                            .getInt("video_brightness", 100);
+                    if (audioManager != null) gestureStartVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+                    longPressHandler.postDelayed(longPressTask, 500);
+                    return true;
+                case android.view.MotionEvent.ACTION_MOVE: {
+                    float dx = event.getX() - gestureStartX;
+                    float dy = event.getY() - gestureStartY;
+                    if (!gestureMoved && (Math.abs(dx) > MOVE_THRESHOLD || Math.abs(dy) > MOVE_THRESHOLD)) {
+                        gestureMoved = true;
+                        longPressHandler.removeCallbacks(longPressTask);
+                        if (Math.abs(dx) > Math.abs(dy)) {
+                            gestureMode = GESTURE_SCRUB;
+                        } else {
+                            float halfW = playerView.getWidth() / 2f;
+                            gestureMode = (event.getX() < halfW) ? GESTURE_BRIGHT : GESTURE_VOLUME;
+                        }
+                    }
+                    if (!gestureMoved) return true;
+                    if (gestureMode == GESTURE_SCRUB) doScrubGesture(dx);
+                    else if (gestureMode == GESTURE_BRIGHT) doBrightGesture(dy);
+                    else if (gestureMode == GESTURE_VOLUME) doVolumeGesture(dy);
+                    return true;
+                }
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    longPressHandler.removeCallbacks(longPressTask);
+                    if (longPressing) {
+                        longPressing = false;
+                        if (player != null) {
+                            player.setPlaybackSpeed(speedBeforeLongPress);
+                            danmuView.setPlaybackSpeed(speedBeforeLongPress);
+                        }
+                        if (tvSpeedHint != null) tvSpeedHint.setVisibility(View.GONE);
+                        return true;
+                    }
+                    if (gestureMoved) {
+                        if (gestureMode == GESTURE_SCRUB) {
+                            commitScrubGesture();
+                        } else {
+                            if (gestureMode == GESTURE_BRIGHT) {
+                                getSharedPreferences("fntv_prefs", MODE_PRIVATE)
+                                        .edit().putInt("video_brightness", gestureBrightness).apply();
+                            }
+                            if (tvBrightOverlay != null) tvBrightOverlay.setVisibility(View.GONE);
+                            if (tvVolOverlay != null) tvVolOverlay.setVisibility(View.GONE);
+                        }
+                        return true;
+                    }
+                    // 纯点击：切换控制栏
+                    if (ctrlVis) showCtrl(false); else showCtrl(true);
+                    return true;
+            }
+            return false;
+        });
+    }
+
+    private void doScrubGesture(float dx) {
+        if (player == null) return;
+        long dur = player.getDuration();
+        float width = playerView.getWidth();
+        if (dur <= 0 || width <= 0) return;
+        long delta = (long) (dx / width * dur);
+        long target = Math.max(0, Math.min(dur, gestureStartPos + delta));
+        gestureTargetPos = target;
+        String t = FormatUtils.fmt(target) + " / " + FormatUtils.fmt(dur);
+        tvSeekOverlay.setText(t);
+        tvSeekOverlay.setVisibility(View.VISIBLE);
+        tvTime.setText(t);
+        handler.removeCallbacks(hideSeekOverlayR);
+        handler.postDelayed(hideSeekOverlayR, 2000);
+    }
+
+    private void commitScrubGesture() {
+        if (player != null && gestureTargetPos >= 0) {
+            player.seekTo(gestureTargetPos);
+            if (danmuManager != null) danmuManager.onSeekTo(gestureTargetPos);
+        }
+        if (tvSeekOverlay != null) tvSeekOverlay.setVisibility(View.GONE);
+        gestureTargetPos = -1;
+    }
+
+    private void doBrightGesture(float dy) {
+        float height = playerView.getHeight();
+        if (height <= 0) return;
+        float step = -dy / height * 200f;
+        int val = Math.max(0, Math.min(200, Math.round(gestureBrightness + step)));
+        gestureBrightness = val;
+        applyBrightness(val);
+        if (tvBrightOverlay != null) {
+            int pct = val - 100;
+            tvBrightOverlay.setText("亮度 " + (pct > 0 ? "+" : "") + pct + "%");
+            tvBrightOverlay.setVisibility(View.VISIBLE);
+            handler.removeCallbacks(hideBrightR);
+            handler.postDelayed(hideBrightR, 800);
+        }
+    }
+
+    private void doVolumeGesture(float dy) {
+        if (audioManager == null || maxVolume <= 0) return;
+        float height = playerView.getHeight();
+        if (height <= 0) return;
+        float step = -dy / height * (maxVolume + 1);
+        int vol = Math.max(0, Math.min(maxVolume, Math.round(gestureStartVol + step)));
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, vol, AudioManager.FLAG_SHOW_UI);
+        if (tvVolOverlay != null) {
+            int pct = maxVolume > 0 ? (int) (vol * 100f / maxVolume) : 0;
+            tvVolOverlay.setText("音量 " + pct + "%");
+            tvVolOverlay.setVisibility(View.VISIBLE);
+            handler.removeCallbacks(hideVolR);
+            handler.postDelayed(hideVolR, 800);
+        }
+    }
+
+    /** 全屏模式选择弹窗（彻底全屏 / 保留系统栏全屏） */
+    private void showFullscreenDialog() {
+        SharedPreferences p = getSharedPreferences("fntv_prefs", MODE_PRIVATE);
+        final String[] sel = { p.getString("fullscreen_mode", "immersive") };
+        final android.app.Dialog d = new android.app.Dialog(this, R.style.Theme_FntvApp_Dialog);
+        d.setContentView(R.layout.dialog_fullscreen);
+        d.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF1A1A1A));
+        final ImageView chkImm = d.findViewById(R.id.chk_immersive);
+        final ImageView chkSys = d.findViewById(R.id.chk_system);
+        final Runnable upd = () -> {
+            if (chkImm != null) chkImm.setVisibility("immersive".equals(sel[0]) ? View.VISIBLE : View.INVISIBLE);
+            if (chkSys != null) chkSys.setVisibility("system".equals(sel[0]) ? View.VISIBLE : View.INVISIBLE);
+        };
+        upd.run();
+        View rowImm = d.findViewById(R.id.row_immersive);
+        View rowSys = d.findViewById(R.id.row_system);
+        if (rowImm != null) rowImm.setOnClickListener(v -> { sel[0] = "immersive"; upd.run(); });
+        if (rowSys != null) rowSys.setOnClickListener(v -> { sel[0] = "system"; upd.run(); });
+        View cancel = d.findViewById(R.id.btn_cancel);
+        if (cancel != null) cancel.setOnClickListener(v -> d.dismiss());
+        View ok = d.findViewById(R.id.btn_ok);
+        if (ok != null) ok.setOnClickListener(v -> {
+            p.edit().putString("fullscreen_mode", sel[0]).apply();
+            applyFullscreenMode();
+            d.dismiss();
+        });
+        d.show();
+    }
+
+    /** TextureView Surface 生命周期：倒车影像抢占 / 重建时保存位置并暂停，恢复后续播。
+     *  本构建的 ExoPlayer 2.18.7 未暴露 PlayerView.setSurfaceListener，故包装 PlayerView 内部
+     *  已有的 SurfaceTextureListener，转发渲染链路的同时挂钩 surface 销毁/重建事件。不持有 Surface 引用。 */
+    private void setupVideoSurfaceListener() {
+        android.view.View sv = playerView.getVideoSurfaceView();
+        if (!(sv instanceof android.view.TextureView)) return;
+        final android.view.TextureView textureView = (android.view.TextureView) sv;
+        // 取出 ExoPlayer 既已设置的监听，外包一层，保证视频渲染链路不被破坏
+        final android.view.TextureView.SurfaceTextureListener inner = textureView.getSurfaceTextureListener();
+        textureView.setSurfaceTextureListener(new android.view.TextureView.SurfaceTextureListener() {
+            @Override
+            public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture surface, int width, int height) {
+                if (inner != null) inner.onSurfaceTextureAvailable(surface, width, height);
+                // surface 重建（退出倒车）：恢复到保存位置续播
+                if (surfacePausedByRecycle && player != null) {
+                    try { player.seekTo(savedSurfacePos); } catch (Exception ignored) {}
+                    if (wasPlayingBeforeRecycle) player.setPlayWhenReady(true);
+                    surfacePausedByRecycle = false;
+                    wasPlayingBeforeRecycle = false;
+                }
+            }
+            @Override
+            public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture surface) {
+                // surface 销毁（倒车影像抢占）：保存位置并暂停；不缓存引用
+                boolean release = inner != null ? inner.onSurfaceTextureDestroyed(surface) : true;
+                if (player != null && player.getPlaybackState() == Player.STATE_READY) {
+                    savedSurfacePos = player.getCurrentPosition();
+                    wasPlayingBeforeRecycle = player.isPlaying();
+                    surfacePausedByRecycle = true;
+                    player.setPlayWhenReady(false);
+                }
+                return release;
+            }
+            @Override
+            public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture surface, int width, int height) {
+                if (inner != null) inner.onSurfaceTextureSizeChanged(surface, width, height);
+            }
+            @Override
+            public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture surface) {
+                if (inner != null) inner.onSurfaceTextureUpdated(surface);
+            }
+        });
     }
 
     private TextView tvSeekOverlay;

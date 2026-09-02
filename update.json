@@ -1,7 +1,7 @@
 {
-    "versionCode": 23,
-    "versionName": "1.2.3",
-    "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.3/FNTV_byd_v1.2.3.apk",
-    "changelog": "1.修复设置页 checkbox/switch 选中图标在车机 ROM 上显示空白（改用本地矢量控件样式）\n2.修复「保留文件夹层级」媒体库无法识别：点击文件夹进入下级，列表为空时自动回退文件夹模式\n3.界面美化：顶部标题栏、Tab 选中态强调色填充、海报占位渐变\n",
+    "versionCode": 24,
+    "versionName": "1.2.4",
+    "apkUrl": "https://github.com/my788525/fnos_tv_danmu_byd/releases/download/v1.2.4/FNTV_byd_v1.2.4.apk",
+    "changelog": "1.播放器手势：屏幕左右横滑拖动进度、左半屏上下滑动调亮度、右半屏上下滑动调音量\n2.播放时自动全屏；点击屏幕唤起底部进度条与设置项；新增「全屏」设置：彻底全屏（隐藏状态栏+DOCK）/保留系统栏全屏\n3.全屏点击屏幕时左上角出现半透明返回按钮，随控制栏一同超时隐藏\n4.支持车机方向盘物理上下键切换上一集/下一集\n5.改用 TextureView 渲染，倒车影像抢占 Surface 时自动保存进度并暂停，退出倒车后恢复原位置续播\n",
     "forceUpdate": false
   }
