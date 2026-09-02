@@ -21,6 +21,9 @@ public class ItemListRequest {
     @SerializedName("ancestor_guid")
     public String ancestorGuid;
 
+    @SerializedName("parent_guid")
+    public String parentGuid;
+
     public Tags tags;
 
     @SerializedName("exclude_grouped_video")
@@ -78,6 +81,19 @@ public class ItemListRequest {
         return new ItemListRequest(ancestorGuid,
                 Arrays.asList("Movie", "TV", "Directory", "Video", "Episode"),
                 false, "sort_title", "ASC", 100);
+    }
+
+    /** 浏览嵌套文件夹：仅用 parent_guid（ancestor_guid 省略）。
+     *  实测 FnOS 对 fv_ 前缀的文件夹 guid，getItemList 必须走 parent_guid 才能列出子项；
+     *  若同时下发 ancestor_guid 反而返回空。 */
+    public static ItemListRequest browseFolderByParent(String parentGuid) {
+        ItemListRequest req = new ItemListRequest(null,
+                Arrays.asList("Movie", "TV", "Directory", "Video", "Episode", "Season", "Collection", "Folder", "folder"),
+                false, "sort_title", "ASC", 100);
+        req.ancestorGuid = null;
+        req.parentGuid = parentGuid;
+        req.page = 1;
+        return req;
     }
 
     /** 直播频道列表（不设 ancestor_guid / exclude_grouped_video） */

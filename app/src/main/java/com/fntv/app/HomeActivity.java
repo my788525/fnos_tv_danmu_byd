@@ -798,8 +798,12 @@ public class HomeActivity extends AppCompatActivity {
         String sortColumn = libSortColumnIndex == 0 ? "create_time" : "release_date";
         String sortType = libSortOrderIndex == 0 ? "ASC" : "DESC";
         final boolean[] browseRetried = {false};
-        ItemListRequest request = new ItemListRequest(ancestorGuid,
-                BROWSE_TYPES, true, sortColumn, sortType, 50);
+        // FnOS 嵌套文件夹 guid 以 fv_ 开头，必须用 parent_guid 列出子项；顶层媒体库源 guid 用 ancestor_guid。
+        final boolean useParent = ancestorGuid != null && ancestorGuid.startsWith("fv_");
+        ItemListRequest request = useParent
+                ? ItemListRequest.browseFolderByParent(ancestorGuid)
+                : new ItemListRequest(ancestorGuid, BROWSE_TYPES, true, sortColumn, sortType, 50);
+        Log.d("Overview", "browseItems: guid=" + ancestorGuid + " useParent=" + useParent);
         Callback<ApiResponse<ItemListResponse>> browseCb = new Callback<ApiResponse<ItemListResponse>>() {
             @Override
             public void onResponse(Call<ApiResponse<ItemListResponse>> call,
@@ -875,20 +879,20 @@ public class HomeActivity extends AppCompatActivity {
                     }
                     new Handler(Looper.getMainLooper()).post(() -> loadImagesLazily(container, 0));
                 } else {
-                    // 保留文件夹层级媒体库：默认 exclude_grouped_video=1 会过滤掉目录结构 → 返回空。
-                    // 回退一次：以 exclude_grouped_video=0（文件夹模式）重试，识别此类媒体库。
+                    // 浏览为空：回退尝试另一种 guid 形态（fv_ 文件夹试 ancestor_guid，媒体库源试 parent_guid），
+                    // 再兜底 getPlayInfo（单视频文件夹/合集本身可播放）。
                     if (!browseRetried[0] && response.body() != null && response.body().code == 0) {
                         browseRetried[0] = true;
-                        Log.d("Overview", "browseItems: 空列表(exclude=1)，回退文件夹模式重试(exclude=0, types=" + BROWSE_TYPES + ") guid=" + ancestorGuid);
+                        ItemListRequest altReq = useParent
+                                ? new ItemListRequest(ancestorGuid, BROWSE_TYPES, false, sortColumn, sortType, 50)
+                                : ItemListRequest.browseFolderByParent(ancestorGuid);
+                        Log.d("Overview", "browseItems: 空列表，回退另一种 guid 形态 guid=" + ancestorGuid
+                                + " useParent=" + useParent);
                         loadingView.setVisibility(View.VISIBLE);
-                        ItemListRequest retryReq = new ItemListRequest(ancestorGuid,
-                                BROWSE_TYPES, false, sortColumn, sortType, 50);
-                        apiManager.getApi().getItemList(retryReq).enqueue(this);
+                        apiManager.getApi().getItemList(altReq).enqueue(this);
                         return;
                     }
-                    // 两次浏览均空：兜底尝试 getPlayInfo（单视频文件夹/合集本身可播放，web 对其直接播放）
-                    Log.d("Overview", "browseItems: 两次皆空，兜底尝试 getPlayInfo guid=" + ancestorGuid
-                            + " | lastRespCode=" + (response.body() != null ? response.body().code : "null"));
+                    Log.d("Overview", "browseItems: 全部浏览皆空，兜底 getPlayInfo guid=" + ancestorGuid);
                     tryPlayFolderAsDetail(ancestorGuid, title, container, loadingView);
                 }
             }
@@ -951,8 +955,7 @@ public class HomeActivity extends AppCompatActivity {
         });
     }
 
-    /** 浏览分区最终空列表提示 */
-    private void showBrowseEmpty(LinearLayout container, View loadingView) {
+    /** 浏览分区最终空列表提示 */    private void showBrowseEmpty(LinearLayout container, View loadingView) {
         loadingView.setVisibility(View.GONE);
         TextView e = new TextView(HomeActivity.this);
         e.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 120));
