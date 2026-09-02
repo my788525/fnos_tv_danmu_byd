@@ -105,9 +105,11 @@ public class PlayListItem {
         public Object colorRangeType;
     }
 
-    /** 判断是否为文件夹/分类（可浏览进入） */
+    /** 判断是否为文件夹/分类（可浏览进入）。
+     *  注意：TV（电视剧/剧集 Series）不是文件夹——点击应走 getPlayInfo 详情页（渲染季/集），
+     *  而非 browseItems 子目录浏览（其 getItemList 不请求 Season 类型，会导致空列表显示「暂无内容」）。 */
     public boolean isFolder() {
-        return "Directory".equals(type) || "TV".equals(type)
+        return "Directory".equals(type)
                 || "Folder".equals(type) || "folder".equals(type);
     }
 
