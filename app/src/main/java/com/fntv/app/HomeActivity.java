@@ -19,12 +19,14 @@ import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
 import com.fntv.app.api.FnApiManager;
 import com.fntv.app.api.model.*;
+import com.fntv.app.util.MediaSortHelper;
 import com.fntv.app.util.SimpleImageLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Stack;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
@@ -54,6 +56,47 @@ public class HomeActivity extends AppCompatActivity {
     private RelativeLayout rlDecoderSetting, rlSeekStep;
     private TextView tvSeekStepValue;
 
+    // 影视菜单与列表视图模式设置
+    public static final String PREF_VIEW_MODE = "pref_view_mode"; // "list" 或 "grid"，默认 "list"
+    public static final String PREF_SORT_FIELD = "pref_sort_field"; // 0=名称, 1=修改时间, 2=创建时间
+    public static final String PREF_SORT_ORDER = "pref_sort_order"; // 0=正序(ASC), 1=反序(DESC)
+    public static final String PREF_FOLDERS_FIRST = "pref_folders_first"; // 默认 true
+
+    private RelativeLayout rlViewModeSetting, rlSortFieldSetting, rlSortOrderSetting, rlFoldersFirstSetting;
+    private TextView tvViewModeValue, tvSortFieldValue, tvSortOrderValue, tvFoldersFirstValue;
+
+    public static class FolderNavState {
+        public String guid;
+        public String title;
+        public String singleChildGuid;
+        public boolean parentIsFolder;
+        public List<PlayListItem> cachedList;
+        public FolderNavState(String guid, String title, String singleChildGuid, boolean parentIsFolder, List<PlayListItem> list) {
+            this.guid = guid;
+            this.title = title;
+            this.singleChildGuid = singleChildGuid;
+            this.parentIsFolder = parentIsFolder;
+            this.cachedList = list;
+        }
+    }
+    private final Stack<FolderNavState> folderNavStack = new Stack<>();
+
+    public boolean isListViewMode() {
+        return "list".equals(prefs != null ? prefs.getString(PREF_VIEW_MODE, "list") : "list");
+    }
+
+    public int getSortField() {
+        return prefs != null ? prefs.getInt(PREF_SORT_FIELD, MediaSortHelper.SORT_MODIFY_TIME) : MediaSortHelper.SORT_MODIFY_TIME;
+    }
+
+    public int getSortOrder() {
+        return prefs != null ? prefs.getInt(PREF_SORT_ORDER, MediaSortHelper.ORDER_DESC) : MediaSortHelper.ORDER_DESC;
+    }
+
+    public boolean isFoldersFirst() {
+        return prefs != null ? prefs.getBoolean(PREF_FOLDERS_FIRST, true) : true;
+    }
+
     private int currentTab = 0;
     private final List<MediaDbItem> mediaLibraries = new ArrayList<>();
     private boolean showingOverview = true;
@@ -64,8 +107,8 @@ public class HomeActivity extends AppCompatActivity {
     private String currentBrowseGuid;
     private String currentBrowseTitle;
     private LinearLayout currentBrowseContainer;
-    private boolean browseListViewMode = false;            // 需求B：网格/列表 视图切换
-    private boolean currentBrowseParentIsFolder = false;   // 需求D：当前浏览父级是否为文件夹型
+    private boolean browseListViewMode = true;             // 默认采用列表视图
+    private boolean currentBrowseParentIsFolder = false;   // 当前浏览父级是否为文件夹型
     private TextView currentBrowseLoading;
     private String currentBrowseSingleChildGuid;
     private int libSortColumnIndex = 0; // 0=添加日期, 1=发行日期
@@ -179,6 +222,15 @@ public class HomeActivity extends AppCompatActivity {
         tvSeekStepValue = findViewById(R.id.tvSeekStepValue);
         tvSettingServer.setText(prefs.getString("host", ""));
 
+        rlViewModeSetting = findViewById(R.id.rlViewModeSetting);
+        tvViewModeValue = findViewById(R.id.tvViewModeValue);
+        rlSortFieldSetting = findViewById(R.id.rlSortFieldSetting);
+        tvSortFieldValue = findViewById(R.id.tvSortFieldValue);
+        rlSortOrderSetting = findViewById(R.id.rlSortOrderSetting);
+        tvSortOrderValue = findViewById(R.id.tvSortOrderValue);
+        rlFoldersFirstSetting = findViewById(R.id.rlFoldersFirstSetting);
+        tvFoldersFirstValue = findViewById(R.id.tvFoldersFirstValue);
+
         TextView tvVersion = findViewById(R.id.tvVersionName);
         try {
             tvVersion.setText("飞牛影视BYD专用版 v" + getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
@@ -284,15 +336,20 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     /** 构建概览 */
-
     private void showOverview() {
         tvMoviesLoading.setVisibility(View.GONE);
         savedDetailItem = null; savedDetailInfo = null; savedBrowseList = null; savedBrowseGuid = null;
         savedLiveChannelTitle = null;
+        folderNavStack.clear();
         showingEpisodes = false;
         moviesContainer.removeAllViews();
         showingOverview = true;
         overviewBuilt = true;
+
+        if (isListViewMode()) {
+            renderOverviewList();
+            return;
+        }
 
         // 继续观看（最顶部，占位，稍后由 loadContinueWatching 填充）
         LinearLayout continueWatchingBox = new LinearLayout(this);
@@ -324,8 +381,6 @@ public class HomeActivity extends AppCompatActivity {
             moviesContainer.addView(makeSpacer(16));
         }
 
-        // 继续观看卡片 ↓ 第一个查看全部（在 loadContinueWatching 中设置焦点）
-
         if (moviesContainer.getChildCount() == 0) {
             TextView e = new TextView(this);
             e.setLayoutParams(new LinearLayout.LayoutParams(
@@ -338,9 +393,162 @@ public class HomeActivity extends AppCompatActivity {
         }
     }
 
-    /** 加载各媒体库预览 */
+    /** 列表模式下的概览：以文件夹列表展示所有媒体库分类 */
+    private void renderOverviewList() {
+        moviesContainer.removeAllViews();
+        showingOverview = true;
+        overviewBuilt = true;
 
+        // 顶部控制栏
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setBackgroundResource(R.drawable.bg_input);
+        topBar.setPadding(16, 12, 16, 12);
+
+        TextView titleTv = new TextView(this);
+        titleTv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        titleTv.setText("📁 影视分类 (" + mediaLibraries.size() + " 个媒体库)");
+        titleTv.setTextColor(0xFFEEEEEE);
+        titleTv.setTextSize(15);
+        titleTv.setTypeface(Typeface.DEFAULT_BOLD);
+        topBar.addView(titleTv);
+
+        // 排序方式快捷按钮
+        Button sortFieldBtn = new Button(this);
+        sortFieldBtn.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
+        sortFieldBtn.setBackgroundResource(R.drawable.bg_btn_primary);
+        sortFieldBtn.setText(MediaSortHelper.SORT_FIELD_LABELS[getSortField()] + " ▾");
+        sortFieldBtn.setTextColor(0xFFEEEEEE);
+        sortFieldBtn.setTextSize(12);
+        sortFieldBtn.setFocusable(true);
+        sortFieldBtn.setPadding(16, 0, 16, 0);
+        sortFieldBtn.setOnClickListener(v -> showSortFieldDialog());
+        topBar.addView(sortFieldBtn);
+
+        View sp1 = new View(this);
+        sp1.setLayoutParams(new LinearLayout.LayoutParams(12, 1));
+        topBar.addView(sp1);
+
+        // 升降序快捷按钮
+        Button sortOrderBtn = new Button(this);
+        sortOrderBtn.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
+        sortOrderBtn.setBackgroundResource(R.drawable.bg_btn_primary);
+        sortOrderBtn.setText(getSortOrder() == MediaSortHelper.ORDER_ASC ? "正序 ▴" : "反序 ▾");
+        sortOrderBtn.setTextColor(0xFFEEEEEE);
+        sortOrderBtn.setTextSize(12);
+        sortOrderBtn.setFocusable(true);
+        sortOrderBtn.setPadding(16, 0, 16, 0);
+        sortOrderBtn.setOnClickListener(v -> toggleSortOrder());
+        topBar.addView(sortOrderBtn);
+
+        View sp2 = new View(this);
+        sp2.setLayoutParams(new LinearLayout.LayoutParams(12, 1));
+        topBar.addView(sp2);
+
+        // 视图切换按钮
+        Button viewToggleBtn = new Button(this);
+        viewToggleBtn.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
+        viewToggleBtn.setBackgroundResource(R.drawable.bg_btn_primary);
+        viewToggleBtn.setText(isListViewMode() ? "📁 列表视图" : "▦ 海报视图");
+        viewToggleBtn.setTextColor(0xFFEEEEEE);
+        viewToggleBtn.setTextSize(12);
+        viewToggleBtn.setFocusable(true);
+        viewToggleBtn.setPadding(16, 0, 16, 0);
+        viewToggleBtn.setOnClickListener(v -> toggleViewMode());
+        topBar.addView(viewToggleBtn);
+
+        moviesContainer.addView(topBar);
+        moviesContainer.addView(makeSpacer(8));
+
+        // 继续观看占位
+        LinearLayout continueBox = new LinearLayout(this);
+        continueBox.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        continueBox.setOrientation(LinearLayout.VERTICAL);
+        continueBox.setTag("continue_watching");
+        moviesContainer.addView(continueBox);
+
+        // 媒体库文件夹列表
+        for (MediaDbItem lib : mediaLibraries) {
+            moviesContainer.addView(makeLibFolderRow(lib));
+            moviesContainer.addView(makeSpacer(6));
+        }
+
+        if (mediaLibraries.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 120));
+            empty.setGravity(Gravity.CENTER);
+            empty.setText("暂无媒体库分类");
+            empty.setTextColor(0xFF808080);
+            empty.setTextSize(14);
+            moviesContainer.addView(empty);
+        }
+    }
+
+    private View makeLibFolderRow(final MediaDbItem lib) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBackgroundResource(R.drawable.bg_media_card);
+        row.setFocusable(true);
+        row.setClickable(true);
+        row.setMinimumHeight((int) (58 * getResources().getDisplayMetrics().density));
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(16, 12, 16, 12);
+
+        TextView icon = new TextView(this);
+        icon.setText("📁");
+        icon.setTextSize(20);
+        icon.setPadding(0, 0, 16, 0);
+        row.addView(icon);
+
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        textCol.setOrientation(LinearLayout.VERTICAL);
+
+        TextView title = new TextView(this);
+        title.setText(lib.title != null ? lib.title : "未命名分类");
+        title.setTextSize(16);
+        title.setTextColor(0xFFEEEEEE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        textCol.addView(title);
+
+        TextView sub = new TextView(this);
+        sub.setText("媒体库文件夹 · 类型: " + (lib.category != null ? lib.category : "综合"));
+        sub.setTextSize(12);
+        sub.setTextColor(0xFF808080);
+        textCol.addView(sub);
+
+        row.addView(textCol);
+
+        TextView arrow = new TextView(this);
+        arrow.setText("进入 ›");
+        arrow.setTextSize(13);
+        arrow.setTextColor(0xFF81C784);
+        arrow.setPadding(12, 0, 4, 0);
+        row.addView(arrow);
+
+        row.setOnFocusChangeListener((v, hasFocus) -> {
+            row.setScaleX(hasFocus ? 1.015f : 1.0f);
+            row.setScaleY(hasFocus ? 1.015f : 1.0f);
+            row.setBackgroundResource(hasFocus ? R.drawable.bg_input : R.drawable.bg_media_card);
+        });
+
+        row.setOnClickListener(v -> browseItems(lib.guid, lib.title));
+        return row;
+    }
+
+    /** 加载各媒体库预览 */
     private void loadAllPreviews() {
+        if (isListViewMode()) return; // 列表模式无需耗费资源拉取海报预览
         if (loadingPreviews) return;
         loadingPreviews = true;
         for (final MediaDbItem lib : mediaLibraries) {
@@ -450,11 +658,21 @@ public class HomeActivity extends AppCompatActivity {
         h.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         h.setPadding(6, 8, 6, 4);
-        h.setText("▶ 继续观看");
+        h.setText("▶ 继续观看 (" + items.size() + ")");
         h.setTextColor(0xFF81C784);
         h.setTextSize(15);
         h.setTypeface(Typeface.DEFAULT_BOLD);
         cont.addView(h);
+
+        if (isListViewMode()) {
+            for (PlayListItem item : items) {
+                View row = makeListItemRow(item);
+                cont.addView(row);
+                cont.addView(makeSpacer(6));
+            }
+            cont.addView(makeSpacer(6));
+            return;
+        }
 
         HorizontalScrollView hsv = new HorizontalScrollView(this);
         hsv.setLayoutParams(new LinearLayout.LayoutParams(
@@ -757,11 +975,15 @@ public class HomeActivity extends AppCompatActivity {
 
     private void onItemClick(PlayListItem item) {
         if (item != null && item.isFolder()) {
-            // 文件夹/分类：进入下级目录浏览，而非尝试播放详情
+            // 文件夹/分类：推入导航栈，进入下级目录浏览
+            if (currentBrowseGuid != null) {
+                folderNavStack.push(new FolderNavState(currentBrowseGuid, currentBrowseTitle,
+                        currentBrowseSingleChildGuid, currentBrowseParentIsFolder, savedBrowseList));
+            }
             browseItemsInContainer(item.guid, item.getDisplayTitle(),
                     currentBrowseContainer, currentBrowseLoading,
                     (item.singleChildGuid != null && !item.singleChildGuid.isEmpty()) ? item.singleChildGuid : null,
-                    item.isFolder());
+                    true);
         } else {
             showDetail(item);  // 可播放项走 getPlayInfo
         }
@@ -797,14 +1019,14 @@ public class HomeActivity extends AppCompatActivity {
         container.removeAllViews();
         loadingView.setVisibility(View.VISIBLE);
 
-        String sortColumn = libSortColumnIndex == 0 ? "create_time" : "release_date";
-        String sortType = libSortOrderIndex == 0 ? "ASC" : "DESC";
+        String sortColumn = MediaSortHelper.getApiSortColumn(getSortField());
+        String sortType = MediaSortHelper.getApiSortType(getSortOrder());
         final boolean[] browseRetried = {false};
         // FnOS 嵌套文件夹 guid 以 fv_ 开头，必须用 parent_guid 列出子项；顶层媒体库源 guid 用 ancestor_guid。
         final boolean useParent = ancestorGuid != null && ancestorGuid.startsWith("fv_");
         ItemListRequest request = useParent
                 ? ItemListRequest.browseFolderByParent(ancestorGuid)
-                : new ItemListRequest(ancestorGuid, BROWSE_TYPES, true, sortColumn, sortType, 50);
+                : new ItemListRequest(ancestorGuid, BROWSE_TYPES, true, sortColumn, sortType, 100);
         Log.d("Overview", "browseItems: guid=" + ancestorGuid + " useParent=" + useParent);
         Callback<ApiResponse<ItemListResponse>> browseCb = new Callback<ApiResponse<ItemListResponse>>() {
             @Override
@@ -817,8 +1039,6 @@ public class HomeActivity extends AppCompatActivity {
                         && response.body().data != null && response.body().data.list != null
                         && !response.body().data.list.isEmpty()) {
                     List<PlayListItem> list = response.body().data.list;
-                    savedBrowseList = list;
-                    savedBrowseTitle = title;
                     int total = response.body().data.total;
                     StringBuilder typeSummary = new StringBuilder();
                     for (PlayListItem pli : list) {
@@ -827,18 +1047,18 @@ public class HomeActivity extends AppCompatActivity {
                     Log.d("Overview", "browseItems: got " + list.size() + " items, total=" + total
                             + " | types: " + typeSummary.toString());
 
-                    // 需求D：非文件夹形式的类别不展示子文件夹(Directory)卡片；
-                    // 仅文件夹型类别才展示子文件夹。
-                    // 注意：不再按 type=="Episode" 过滤——fnOS 影片库里单集(Episode)常是剧集的唯一入口
-                    // （无对应 TV/Season 容器），一刀切会误删整部剧集。单集经剧集详情页查看即可。
+                    // 非文件夹形式的类别不展示子文件夹(Directory)卡片；仅文件夹型类别才展示子文件夹。
                     if (!parentIsFolder) {
                         List<PlayListItem> filtered = new ArrayList<>();
                         for (PlayListItem pli : list) {
                             if (!pli.isFolder()) filtered.add(pli);
                         }
                         list = filtered;
-                        savedBrowseList = list;
                     }
+
+                    MediaSortHelper.sortItems(list, getSortField(), getSortOrder(), isFoldersFirst());
+                    savedBrowseList = list;
+                    savedBrowseTitle = title;
 
                     renderBrowseAll(container, list, title);
                 } else {
@@ -956,15 +1176,16 @@ public class HomeActivity extends AppCompatActivity {
         bar.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setBackgroundResource(R.drawable.bg_input);
-        bar.setPadding(16, 18, 16, 18);
+        bar.setPadding(16, 12, 16, 12);
 
         // 排序方式标签
         TextView sortLabel = new TextView(this);
         sortLabel.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         sortLabel.setGravity(Gravity.CENTER_VERTICAL);
-        sortLabel.setText("排序方式: ");
+        sortLabel.setText("排序: ");
         sortLabel.setTextColor(0xFFB0B0B0);
         sortLabel.setTextSize(13);
         bar.addView(sortLabel);
@@ -972,32 +1193,18 @@ public class HomeActivity extends AppCompatActivity {
         // 排序列选择按钮
         Button sortColumnBtn = new Button(this);
         sortColumnBtn.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, 78));
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
         sortColumnBtn.setBackgroundResource(R.drawable.bg_btn_primary);
-        String[] colLabels = {"添加日期", "发行日期"};
-        sortColumnBtn.setText(colLabels[libSortColumnIndex] + " ▾");
+        sortColumnBtn.setText(MediaSortHelper.SORT_FIELD_LABELS[getSortField()] + " ▾");
         sortColumnBtn.setTextColor(0xFFEEEEEE);
         sortColumnBtn.setTextSize(12);
         sortColumnBtn.setFocusable(true);
-        sortColumnBtn.setPadding(14, 0, 14, 0);
+        sortColumnBtn.setPadding(16, 0, 16, 0);
         sortColumnBtn.setOnFocusChangeListener((v, hasFocus) -> {
-            v.setScaleX(hasFocus ? 1.08f : 1.0f);
-            v.setScaleY(hasFocus ? 1.08f : 1.0f);
+            v.setScaleX(hasFocus ? 1.05f : 1.0f);
+            v.setScaleY(hasFocus ? 1.05f : 1.0f);
         });
-        final Button colBtnRef = sortColumnBtn;
-        sortColumnBtn.setOnClickListener(v ->
-                new android.app.AlertDialog.Builder(this)
-                        .setTitle("排序方式")
-                        .setSingleChoiceItems(colLabels, libSortColumnIndex,
-                                (dialog, which) -> {
-                                    libSortColumnIndex = which;
-                                    colBtnRef.setText(colLabels[which] + " ▾");
-                                    dialog.dismiss();
-                                    reFetchLibraryItems();
-                                })
-                        .setNegativeButton("取消", null)
-                        .show()
-        );
+        sortColumnBtn.setOnClickListener(v -> showSortFieldDialog());
         bar.addView(sortColumnBtn);
 
         // 弹性间隔
@@ -1018,75 +1225,183 @@ public class HomeActivity extends AppCompatActivity {
         // 排序顺序选择按钮
         Button sortOrderBtn = new Button(this);
         sortOrderBtn.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, 78));
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
         sortOrderBtn.setBackgroundResource(R.drawable.bg_btn_primary);
-        String[] orderLabels = {"升序", "降序"};
-        sortOrderBtn.setText(orderLabels[libSortOrderIndex] + " ▾");
+        sortOrderBtn.setText(getSortOrder() == MediaSortHelper.ORDER_ASC ? "正序 ▴" : "反序 ▾");
         sortOrderBtn.setTextColor(0xFFEEEEEE);
         sortOrderBtn.setTextSize(12);
         sortOrderBtn.setFocusable(true);
-        sortOrderBtn.setPadding(14, 0, 14, 0);
+        sortOrderBtn.setPadding(16, 0, 16, 0);
         sortOrderBtn.setOnFocusChangeListener((v, hasFocus) -> {
-            v.setScaleX(hasFocus ? 1.08f : 1.0f);
-            v.setScaleY(hasFocus ? 1.08f : 1.0f);
+            v.setScaleX(hasFocus ? 1.05f : 1.0f);
+            v.setScaleY(hasFocus ? 1.05f : 1.0f);
         });
-        final Button orderBtnRef = sortOrderBtn;
-        sortOrderBtn.setOnClickListener(v ->
-                new android.app.AlertDialog.Builder(this)
-                        .setTitle("排序顺序")
-                        .setSingleChoiceItems(orderLabels, libSortOrderIndex,
-                                (dialog, which) -> {
-                                    libSortOrderIndex = which;
-                                    orderBtnRef.setText(orderLabels[which] + " ▾");
-                                    dialog.dismiss();
-                                    reFetchLibraryItems();
-                                })
-                        .setNegativeButton("取消", null)
-                        .show()
-        );
+        sortOrderBtn.setOnClickListener(v -> toggleSortOrder());
         bar.addView(sortOrderBtn);
+
+        View sp3 = new View(this);
+        sp3.setLayoutParams(new LinearLayout.LayoutParams(12, 1));
+        bar.addView(sp3);
 
         // 网格/列表 视图切换
         Button viewToggle = new Button(this);
         viewToggle.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, 78));
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
         viewToggle.setBackgroundResource(R.drawable.bg_btn_primary);
-        viewToggle.setText((browseListViewMode ? "☰ 列表" : "▦ 网格") + " 视图");
+        viewToggle.setText(isListViewMode() ? "📁 列表" : "▦ 海报");
         viewToggle.setTextColor(0xFFEEEEEE);
         viewToggle.setTextSize(12);
         viewToggle.setFocusable(true);
-        viewToggle.setPadding(14, 0, 14, 0);
+        viewToggle.setPadding(16, 0, 16, 0);
         viewToggle.setOnFocusChangeListener((v, hasFocus) -> {
-            v.setScaleX(hasFocus ? 1.08f : 1.0f);
-            v.setScaleY(hasFocus ? 1.08f : 1.0f);
+            v.setScaleX(hasFocus ? 1.05f : 1.0f);
+            v.setScaleY(hasFocus ? 1.05f : 1.0f);
         });
-        viewToggle.setOnClickListener(v -> {
-            browseListViewMode = !browseListViewMode;
-            rerenderBrowseBody();
-        });
+        viewToggle.setOnClickListener(v -> toggleViewMode());
         bar.addView(viewToggle);
 
         return bar;
     }
 
+    private void toggleViewMode() {
+        String newMode = isListViewMode() ? "grid" : "list";
+        prefs.edit().putString(PREF_VIEW_MODE, newMode).apply();
+        if (tvViewModeValue != null) {
+            tvViewModeValue.setText("list".equals(newMode) ? "文件夹/文件列表" : "海报墙模式");
+        }
+        if (currentTab == 0 && showingOverview) {
+            showOverview();
+            if (!isListViewMode()) {
+                loadAllPreviews();
+                loadContinueWatching();
+                loadLiveChannels();
+            } else {
+                loadContinueWatching();
+            }
+        } else if (currentTab == 1 && savedBrowseGuid == null) {
+            loadMediaLibraries();
+        } else if (savedBrowseList != null && currentBrowseContainer != null) {
+            renderBrowseAll(currentBrowseContainer, savedBrowseList, savedBrowseTitle);
+        }
+    }
+
+    private void showSortFieldDialog() {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("排序方式")
+                .setSingleChoiceItems(MediaSortHelper.SORT_FIELD_LABELS, getSortField(), (dialog, which) -> {
+                    prefs.edit().putInt(PREF_SORT_FIELD, which).apply();
+                    if (tvSortFieldValue != null) {
+                        tvSortFieldValue.setText(MediaSortHelper.SORT_FIELD_LABELS[which]);
+                    }
+                    dialog.dismiss();
+                    onSortChanged();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void toggleSortOrder() {
+        int newOrder = getSortOrder() == MediaSortHelper.ORDER_ASC ? MediaSortHelper.ORDER_DESC : MediaSortHelper.ORDER_ASC;
+        prefs.edit().putInt(PREF_SORT_ORDER, newOrder).apply();
+        if (tvSortOrderValue != null) {
+            tvSortOrderValue.setText(MediaSortHelper.SORT_ORDER_LABELS[newOrder]);
+        }
+        onSortChanged();
+    }
+
+    private void onSortChanged() {
+        if (savedBrowseList != null && !savedBrowseList.isEmpty()) {
+            MediaSortHelper.sortItems(savedBrowseList, getSortField(), getSortOrder(), isFoldersFirst());
+            if (currentBrowseContainer != null) {
+                renderBrowseAll(currentBrowseContainer, savedBrowseList, savedBrowseTitle);
+            }
+        } else if (currentBrowseGuid != null) {
+            reFetchLibraryItems();
+        } else if (currentTab == 0 && showingOverview && isListViewMode()) {
+            showOverview();
+        }
+    }
+
+    private void goBackFolder() {
+        if (!folderNavStack.isEmpty()) {
+            FolderNavState prev = folderNavStack.pop();
+            currentBrowseGuid = prev.guid;
+            currentBrowseTitle = prev.title;
+            currentBrowseSingleChildGuid = prev.singleChildGuid;
+            currentBrowseParentIsFolder = prev.parentIsFolder;
+            savedBrowseGuid = prev.guid;
+            savedBrowseTitle = prev.title;
+            if (prev.cachedList != null && !prev.cachedList.isEmpty()) {
+                savedBrowseList = prev.cachedList;
+                renderBrowseAll(currentBrowseContainer, savedBrowseList, savedBrowseTitle);
+            } else {
+                browseItemsInContainer(prev.guid, prev.title, currentBrowseContainer, currentBrowseLoading,
+                        prev.singleChildGuid, prev.parentIsFolder);
+            }
+        } else {
+            if (browseFromLibrary) {
+                savedBrowseGuid = null;
+                savedBrowseList = null;
+                loadMediaLibraries();
+            } else {
+                loadOverview();
+            }
+        }
+    }
+
+    private View makeParentFolderRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBackgroundResource(R.drawable.bg_media_card);
+        row.setFocusable(true);
+        row.setClickable(true);
+        row.setMinimumHeight((int) (52 * getResources().getDisplayMetrics().density));
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(16, 10, 16, 10);
+
+        TextView icon = new TextView(this);
+        icon.setText("📁");
+        icon.setTextSize(18);
+        icon.setPadding(0, 0, 14, 0);
+        row.addView(icon);
+
+        TextView title = new TextView(this);
+        title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        title.setText(".. [返回上一级文件夹]");
+        title.setTextSize(15);
+        title.setTextColor(0xFF81C784);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        row.addView(title);
+
+        row.setOnFocusChangeListener((v, hasFocus) -> {
+            row.setScaleX(hasFocus ? 1.015f : 1.0f);
+            row.setScaleY(hasFocus ? 1.015f : 1.0f);
+            row.setBackgroundResource(hasFocus ? R.drawable.bg_input : R.drawable.bg_media_card);
+        });
+
+        row.setOnClickListener(v -> goBackFolder());
+        return row;
+    }
+
     // ==================== 网格/列表 双视图渲染 ====================
 
-    /** 渲染当前浏览：标题 + 排序栏 + 列表/网格正文（按 browseListViewMode 切换） */
+    /** 渲染当前浏览：标题 + 排序栏 + 列表/网格正文（按 isListViewMode() 切换） */
     private void renderBrowseAll(ViewGroup container, List<PlayListItem> list, String title) {
         container.removeAllViews();
         TextView h = new TextView(HomeActivity.this);
         h.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         h.setPadding(6, 8, 6, 4);
-        h.setText(title + "  (" + list.size() + "项)");
+        h.setText("📁 " + title + " (" + list.size() + "项)");
         h.setTextColor(0xFFEEEEEE);
-        h.setTextSize(14);
+        h.setTextSize(15);
+        h.setTypeface(Typeface.DEFAULT_BOLD);
         container.addView(h);
 
         LinearLayout sortFilterBar = makeLibSortFilterBar();
         sortFilterBar.setTag("lib_sort_bar");
         container.addView(sortFilterBar);
-        container.addView(makeSpacer(6));
+        container.addView(makeSpacer(8));
 
         renderBrowseBody(container, list);
         new Handler(Looper.getMainLooper()).post(() -> loadImagesLazily(container, 0));
@@ -1094,23 +1409,34 @@ public class HomeActivity extends AppCompatActivity {
 
     private void renderBrowseBody(ViewGroup container, List<PlayListItem> list) {
         if (list == null || list.isEmpty()) {
+            if (!folderNavStack.isEmpty() || (currentBrowseGuid != null && !showingOverview)) {
+                container.addView(makeParentFolderRow());
+                container.addView(makeSpacer(6));
+            }
             TextView empty = new TextView(HomeActivity.this);
             empty.setLayoutParams(new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             empty.setPadding(6, 24, 6, 24);
-            empty.setText("暂无内容");
+            empty.setText("文件夹暂无内容");
             empty.setTextColor(0xFF808080);
             empty.setTextSize(14);
             container.addView(empty);
             return;
         }
-        if (browseListViewMode) renderList(container, list);
+        if (isListViewMode()) renderList(container, list);
         else renderGrid(container, list);
     }
 
-    /** 网格视图：固定 8 列，海报固定高度（横屏可完整显示 2 行） */
+    /** 网格视图：根据屏幕宽度自适应列数，海报固定高度 */
     private void renderGrid(ViewGroup container, List<PlayListItem> list) {
+        if (!folderNavStack.isEmpty() || (currentBrowseGuid != null && !showingOverview)) {
+            container.addView(makeParentFolderRow());
+            container.addView(makeSpacer(6));
+        }
         int cols = 8;
+        if (getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+            cols = 4;
+        }
         for (int idx = 0; idx < list.size(); idx += cols) {
             LinearLayout row = new LinearLayout(HomeActivity.this);
             row.setLayoutParams(new LinearLayout.LayoutParams(
@@ -1138,11 +1464,15 @@ public class HomeActivity extends AppCompatActivity {
         }
     }
 
-    /** 列表视图：每行一项，文件夹前缀“[文件夹]”，整行可点击 */
+    /** 列表视图：每行一项，支持文件夹/视频/剧集多样化图标、时长、修改/创建时间与进度显示 */
     private void renderList(ViewGroup container, List<PlayListItem> list) {
+        if (!folderNavStack.isEmpty() || (currentBrowseGuid != null && !showingOverview)) {
+            container.addView(makeParentFolderRow());
+            container.addView(makeSpacer(6));
+        }
         for (PlayListItem pli : list) {
             container.addView(makeListItemRow(pli));
-            container.addView(makeSpacer(4));
+            container.addView(makeSpacer(6));
         }
     }
 
@@ -1152,37 +1482,105 @@ public class HomeActivity extends AppCompatActivity {
         row.setBackgroundResource(R.drawable.bg_media_card);
         row.setFocusable(true);
         row.setClickable(true);
-        row.setMinimumHeight((int) (54 * getResources().getDisplayMetrics().density));
+        row.setMinimumHeight((int) (58 * getResources().getDisplayMetrics().density));
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(14, 10, 14, 10);
 
-        String label;
+        // 左侧类型图标
+        TextView icon = new TextView(this);
+        icon.setTextSize(18);
+        icon.setPadding(0, 0, 12, 0);
         if (item.isFolder()) {
-            label = "[文件夹] " + (item.title != null ? item.title : "未知");
+            icon.setText("📁");
+        } else if ("TV".equals(item.type)) {
+            icon.setText("📺");
+        } else if ("Movie".equals(item.type)) {
+            icon.setText("🎬");
+        } else if ("Episode".equals(item.type)) {
+            icon.setText("▶️");
         } else {
-            label = item.title != null ? item.title : "未知";
+            icon.setText("🎞️");
         }
-        TextView tv = new TextView(this);
-        tv.setLayoutParams(new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        tv.setText(label);
-        tv.setTextSize(15);
-        tv.setTextColor(0xFFEEEEEE);
-        tv.setSingleLine(true);
-        tv.setEllipsize(TextUtils.TruncateAt.END);
-        row.addView(tv);
+        row.addView(icon);
 
-        TextView tag = new TextView(this);
-        String t = item.type;
-        if ("TV".equals(t)) t = "剧集";
-        else if ("Movie".equals(t)) t = "电影";
-        else if ("Directory".equals(t)) t = "文件夹";
-        else if ("Video".equals(t)) t = "视频";
-        tag.setText(t);
-        tag.setTextSize(11);
-        tag.setTextColor(0xFF78909C);
-        tag.setPadding(12, 0, 0, 0);
-        row.addView(tag);
+        // 中间文字区域
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        textCol.setOrientation(LinearLayout.VERTICAL);
+
+        final TextView tvTitle = new TextView(this);
+        tvTitle.setText(item.getDisplayTitle());
+        tvTitle.setTextSize(15);
+        tvTitle.setTextColor(0xFFEEEEEE);
+        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvTitle.setSingleLine(true);
+        tvTitle.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+        tvTitle.setMarqueeRepeatLimit(-1);
+        textCol.addView(tvTitle);
+
+        // 副标题：类型 · 时长 · 修改时间/创建时间
+        StringBuilder subText = new StringBuilder();
+        if (item.isFolder()) {
+            subText.append("[文件夹]");
+        } else if ("TV".equals(item.type)) {
+            subText.append("[剧集]");
+        } else if ("Movie".equals(item.type)) {
+            subText.append("[电影]");
+        } else if ("Episode".equals(item.type)) {
+            subText.append("[单集]");
+        } else {
+            subText.append("[视频]");
+        }
+
+        String dur = item.getFormattedDuration();
+        if (!dur.isEmpty()) {
+            subText.append(" · 时长 ").append(dur);
+        }
+        String date = item.getDisplayDate();
+        if (!date.isEmpty()) {
+            subText.append(" · ").append(date);
+        }
+        TextView tvSub = new TextView(this);
+        tvSub.setText(subText.toString());
+        tvSub.setTextSize(12);
+        tvSub.setTextColor(0xFF808080);
+        tvSub.setSingleLine(true);
+        tvSub.setEllipsize(TextUtils.TruncateAt.END);
+        textCol.addView(tvSub);
+
+        row.addView(textCol);
+
+        // 右侧状态与箭头
+        if (item.isFolder()) {
+            TextView arrow = new TextView(this);
+            arrow.setText("›");
+            arrow.setTextSize(20);
+            arrow.setTextColor(0xFF808080);
+            arrow.setPadding(8, 0, 4, 0);
+            row.addView(arrow);
+        } else if (item.watched == 1) {
+            TextView watched = new TextView(this);
+            watched.setText("✓ 已看");
+            watched.setTextSize(11);
+            watched.setTextColor(0xFF81C784);
+            watched.setPadding(8, 0, 4, 0);
+            row.addView(watched);
+        } else if (item.ts > 0 && item.duration > 0) {
+            int pct = Math.min(100, (int) (item.ts * 100 / item.duration));
+            TextView prog = new TextView(this);
+            prog.setText("进度 " + pct + "%");
+            prog.setTextSize(11);
+            prog.setTextColor(0xFF64B5F6);
+            prog.setPadding(8, 0, 4, 0);
+            row.addView(prog);
+        }
+
+        row.setOnFocusChangeListener((v, hasFocus) -> {
+            row.setScaleX(hasFocus ? 1.015f : 1.0f);
+            row.setScaleY(hasFocus ? 1.015f : 1.0f);
+            row.setBackgroundResource(hasFocus ? R.drawable.bg_input : R.drawable.bg_media_card);
+            tvTitle.setSelected(hasFocus);
+        });
 
         row.setTag(item);
         row.setOnClickListener(v -> onItemClick((PlayListItem) row.getTag()));
@@ -1991,43 +2389,10 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private void showSearchResults(List<PlayListItem> results) {
-        libraryContainer.removeAllViews();
-        float density = getResources().getDisplayMetrics().density;
-        int cols = Math.max(3, (int) (getResources().getDisplayMetrics().widthPixels / (130 * density)));
-        for (int idx = 0; idx < results.size(); idx += cols) {
-            LinearLayout row = new LinearLayout(this);
-            row.setLayoutParams(new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            int inRow = Math.min(cols, results.size() - idx);
-            for (int c = 0; c < cols && idx + c < results.size(); c++) {
-                PlayListItem item = results.get(idx + c);
-                View card = makeItemCard(item);
-                if (card instanceof ViewGroup) {
-                    View ch = ((ViewGroup) card).getChildAt(0);
-                    if (ch instanceof ImageView) {
-                        int posterH = Math.min(550, (int) (getResources().getDisplayMetrics().widthPixels / cols * 1.5));
-                        ch.setLayoutParams(new LinearLayout.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT, posterH));
-                    }
-                }
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-                lp.rightMargin = 6;
-                lp.leftMargin = 6;
-                card.setLayoutParams(lp);
-                row.addView(card);
-            }
-            for (int e = inRow; e < cols; e++) {
-                View spacer = new View(this);
-                spacer.setLayoutParams(new LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-                row.addView(spacer);
-            }
-            libraryContainer.addView(row);
-            libraryContainer.addView(makeSpacer(12));
-        }
-        new Handler(Looper.getMainLooper()).post(() -> loadImagesLazily(libraryContainer, 0));
+        savedBrowseList = results;
+        savedBrowseTitle = "搜索: " + etSearch.getText().toString().trim();
+        MediaSortHelper.sortItems(results, getSortField(), getSortOrder(), isFoldersFirst());
+        renderBrowseAll(libraryContainer, results, savedBrowseTitle);
     }
 
     private void showSearchEmpty() {
@@ -2053,57 +2418,53 @@ public class HomeActivity extends AppCompatActivity {
 
     private void populateLibGrid(LinearLayout cont, List<MediaDbItem> libs) {
         cont.removeAllViews();
+        if (libs == null || libs.isEmpty()) {
+            tvLibraryEmpty.setVisibility(View.VISIBLE);
+            return;
+        }
+        tvLibraryEmpty.setVisibility(View.GONE);
+
+        // 顶部控制栏
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setBackgroundResource(R.drawable.bg_input);
+        topBar.setPadding(16, 12, 16, 12);
+
+        TextView titleTv = new TextView(this);
+        titleTv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        titleTv.setText("📁 媒体库分类 (" + libs.size() + " 个)");
+        titleTv.setTextColor(0xFFEEEEEE);
+        titleTv.setTextSize(15);
+        titleTv.setTypeface(Typeface.DEFAULT_BOLD);
+        topBar.addView(titleTv);
+
+        Button viewToggleBtn = new Button(this);
+        viewToggleBtn.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
+        viewToggleBtn.setBackgroundResource(R.drawable.bg_btn_primary);
+        viewToggleBtn.setText(isListViewMode() ? "📁 列表视图" : "▦ 卡片视图");
+        viewToggleBtn.setTextColor(0xFFEEEEEE);
+        viewToggleBtn.setTextSize(12);
+        viewToggleBtn.setFocusable(true);
+        viewToggleBtn.setPadding(16, 0, 16, 0);
+        viewToggleBtn.setOnClickListener(v -> toggleViewMode());
+        topBar.addView(viewToggleBtn);
+
+        cont.addView(topBar);
+        cont.addView(makeSpacer(8));
+
         for (int i = 0; i < libs.size(); i++) {
-            cont.addView(makeLibCard(libs.get(i)));
-            if (i < libs.size() - 1) cont.addView(makeSpacer(8));
+            cont.addView(makeLibFolderRow(libs.get(i)));
+            cont.addView(makeSpacer(6));
         }
     }
 
 
     private View makeLibCard(MediaDbItem lib) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setBackgroundResource(R.drawable.bg_media_card);
-        card.setPadding(16, 18, 16, 18);
-        card.setFocusable(true);
-        card.setMinimumHeight(56);
-
-        LinearLayout text = new LinearLayout(this);
-        text.setLayoutParams(new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        text.setOrientation(LinearLayout.VERTICAL);
-        text.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView title = new TextView(this);
-        title.setTextSize(16);
-        title.setTextColor(0xFFEEEEEE);
-        title.setText(lib.title);
-        text.addView(title);
-
-        TextView sub = new TextView(this);
-        sub.setTextSize(12);
-        sub.setTextColor(0xFF808080);
-        sub.setText("分类: " + (lib.category != null ? lib.category : "未分类"));
-        text.addView(sub);
-
-        card.addView(text);
-
-        TextView arrow = new TextView(this);
-        arrow.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        arrow.setText("❯");
-        arrow.setTextColor(0xFF808080);
-        arrow.setTextSize(20);
-        arrow.setGravity(Gravity.CENTER);
-        arrow.setPadding(8, 0, 0, 0);
-        card.addView(arrow);
-
-        card.setTag(lib);
-        card.setOnClickListener(v -> {
-            MediaDbItem m = (MediaDbItem) card.getTag();
-            browseItemsInContainer(m.guid, m.title, libraryContainer, tvLibraryLoading, null, isLibFolderForm(m));
-        });
-        return card;
+        return makeLibFolderRow(lib);
     }
 
 
@@ -2140,6 +2501,88 @@ public class HomeActivity extends AppCompatActivity {
             b.setNegativeButton("取消", null);
             b.show();
         });
+
+        // 影视菜单与列表设置
+        if (tvViewModeValue != null) {
+            tvViewModeValue.setText(isListViewMode() ? "文件夹/文件列表" : "海报墙模式");
+        }
+        if (rlViewModeSetting != null) {
+            rlViewModeSetting.setOnClickListener(v -> {
+                String[] modes = {"文件夹/文件列表 (推荐)", "海报墙模式"};
+                int curIndex = isListViewMode() ? 0 : 1;
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle("所有影视菜单显示模式")
+                        .setSingleChoiceItems(modes, curIndex, (dialog, which) -> {
+                            String newMode = which == 0 ? "list" : "grid";
+                            prefs.edit().putString(PREF_VIEW_MODE, newMode).apply();
+                            if (tvViewModeValue != null) {
+                                tvViewModeValue.setText(which == 0 ? "文件夹/文件列表" : "海报墙模式");
+                            }
+                            dialog.dismiss();
+                            if (currentTab == 0 && showingOverview) {
+                                showOverview();
+                            } else if (currentTab == 1 && savedBrowseGuid == null) {
+                                loadMediaLibraries();
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+        }
+
+        if (tvSortFieldValue != null) {
+            tvSortFieldValue.setText(MediaSortHelper.SORT_FIELD_LABELS[getSortField()]);
+        }
+        if (rlSortFieldSetting != null) {
+            rlSortFieldSetting.setOnClickListener(v -> {
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle("默认排序字段")
+                        .setSingleChoiceItems(MediaSortHelper.SORT_FIELD_LABELS, getSortField(), (dialog, which) -> {
+                            prefs.edit().putInt(PREF_SORT_FIELD, which).apply();
+                            if (tvSortFieldValue != null) {
+                                tvSortFieldValue.setText(MediaSortHelper.SORT_FIELD_LABELS[which]);
+                            }
+                            dialog.dismiss();
+                            onSortChanged();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+        }
+
+        if (tvSortOrderValue != null) {
+            tvSortOrderValue.setText(MediaSortHelper.SORT_ORDER_LABELS[getSortOrder()]);
+        }
+        if (rlSortOrderSetting != null) {
+            rlSortOrderSetting.setOnClickListener(v -> {
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle("默认排序顺序")
+                        .setSingleChoiceItems(MediaSortHelper.SORT_ORDER_LABELS, getSortOrder(), (dialog, which) -> {
+                            prefs.edit().putInt(PREF_SORT_ORDER, which).apply();
+                            if (tvSortOrderValue != null) {
+                                tvSortOrderValue.setText(MediaSortHelper.SORT_ORDER_LABELS[which]);
+                            }
+                            dialog.dismiss();
+                            onSortChanged();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+        }
+
+        if (tvFoldersFirstValue != null) {
+            tvFoldersFirstValue.setText(isFoldersFirst() ? "开启" : "关闭");
+        }
+        if (rlFoldersFirstSetting != null) {
+            rlFoldersFirstSetting.setOnClickListener(v -> {
+                boolean next = !isFoldersFirst();
+                prefs.edit().putBoolean(PREF_FOLDERS_FIRST, next).apply();
+                if (tvFoldersFirstValue != null) {
+                    tvFoldersFirstValue.setText(next ? "开启" : "关闭");
+                }
+                onSortChanged();
+            });
+        }
 
         apiManager.getApi().getUserInfo().enqueue(new Callback<ApiResponse<UserInfoResponse>>() {
             @Override
@@ -2217,27 +2660,21 @@ public class HomeActivity extends AppCompatActivity {
         return m + "分" + s + "秒";
     }
 
-    /** 逐张加载图片 */
-
+    /** 异步平滑加载图片 */
     private void loadImagesLazily(ViewGroup container, int index) {
+        if (container == null) return;
         List<ImageView> targets = new ArrayList<>();
         collectImageViews(container, targets);
-        if (targets.isEmpty() || index >= targets.size()) return;
+        if (targets.isEmpty()) return;
 
-        ImageView iv = targets.get(index);
-        Object tag = iv.getTag();
-        if (tag instanceof String) {
-            String url = (String) tag;
-            if (url.startsWith("http")) {
-                SimpleImageLoader.load(url, iv, apiManager.getClient());
+        for (ImageView iv : targets) {
+            Object tag = iv.getTag();
+            if (tag instanceof String) {
+                String url = (String) tag;
+                if (url.startsWith("http")) {
+                    SimpleImageLoader.load(url, iv, apiManager.getClient());
+                }
             }
-        }
-        final int next = index + 1;
-        if (next < targets.size()) {
-            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-                @Override
-                public void run() { loadImagesLazily(container, next); }
-            }, 100);
         }
     }
 
@@ -2570,10 +3007,23 @@ public class HomeActivity extends AppCompatActivity {
                 clearSearch();
                 return true;
             }
+            // 子文件夹导航回退
+            if (!folderNavStack.isEmpty()) {
+                goBackFolder();
+                return true;
+            }
             // 媒体库浏览中 → 返回媒体库首页
             if (currentTab == 1 && savedBrowseGuid != null) {
                 savedBrowseGuid = null; savedBrowseList = null;
+                folderNavStack.clear();
                 loadMediaLibraries();
+                return true;
+            }
+            // 影视 Tab 浏览全部 → 返回影视概览
+            if (currentTab == 0 && savedBrowseGuid != null) {
+                savedBrowseGuid = null; savedBrowseList = null;
+                folderNavStack.clear();
+                loadOverview();
                 return true;
             }
             // 剧集选择页 → 返回详情页
