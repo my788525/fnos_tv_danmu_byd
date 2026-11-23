@@ -1,5 +1,6 @@
 package com.fntv.app;
 
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -543,6 +544,11 @@ public class HomeActivity extends AppCompatActivity {
         });
 
         row.setOnClickListener(v -> browseItems(lib.guid, lib.title));
+        final MediaDbItem libItem = lib;
+        row.setOnLongClickListener(v -> {
+            showLibActionDialog(libItem);
+            return true;
+        });
         return row;
     }
 
@@ -969,6 +975,15 @@ public class HomeActivity extends AppCompatActivity {
 
         card.setTag(item);
         card.setOnClickListener(v -> onItemClick((PlayListItem) card.getTag()));
+        final PlayListItem cardItem = item;
+        card.setOnLongClickListener(v -> {
+            if (cardItem != null && cardItem.isFolder()) {
+                showFolderActionDialog(cardItem);
+            } else if (cardItem != null) {
+                showFileActionDialog(cardItem);
+            }
+            return true;
+        });
         return card;
     }
 
@@ -1259,6 +1274,27 @@ public class HomeActivity extends AppCompatActivity {
         });
         viewToggle.setOnClickListener(v -> toggleViewMode());
         bar.addView(viewToggle);
+
+        View sp4 = new View(this);
+        sp4.setLayoutParams(new LinearLayout.LayoutParams(12, 1));
+        bar.addView(sp4);
+
+        // 全部播放（连续播放当前文件夹内所有视频）
+        Button playAllBtn = new Button(this);
+        playAllBtn.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, (int)(38 * getResources().getDisplayMetrics().density)));
+        playAllBtn.setBackgroundResource(R.drawable.bg_btn_primary);
+        playAllBtn.setText("▶ 全部播放");
+        playAllBtn.setTextColor(0xFF81C784);
+        playAllBtn.setTextSize(12);
+        playAllBtn.setFocusable(true);
+        playAllBtn.setPadding(16, 0, 16, 0);
+        playAllBtn.setOnFocusChangeListener((v, hasFocus) -> {
+            v.setScaleX(hasFocus ? 1.05f : 1.0f);
+            v.setScaleY(hasFocus ? 1.05f : 1.0f);
+        });
+        playAllBtn.setOnClickListener(v -> playAllCurrentFolder());
+        bar.addView(playAllBtn);
 
         return bar;
     }
@@ -1565,7 +1601,7 @@ public class HomeActivity extends AppCompatActivity {
             watched.setTextColor(0xFF81C784);
             watched.setPadding(8, 0, 4, 0);
             row.addView(watched);
-        } else if (item.ts > 0 && item.duration > 0) {
+        } else if (item.ts > 0 && item.duration >= 600) {
             int pct = Math.min(100, (int) (item.ts * 100 / item.duration));
             TextView prog = new TextView(this);
             prog.setText("进度 " + pct + "%");
@@ -1584,6 +1620,15 @@ public class HomeActivity extends AppCompatActivity {
 
         row.setTag(item);
         row.setOnClickListener(v -> onItemClick((PlayListItem) row.getTag()));
+        final PlayListItem rowItem = item;
+        row.setOnLongClickListener(v -> {
+            if (rowItem != null && rowItem.isFolder()) {
+                showFolderActionDialog(rowItem);
+            } else if (rowItem != null) {
+                showFileActionDialog(rowItem);
+            }
+            return true;
+        });
         return row;
     }
 
@@ -1615,6 +1660,10 @@ public class HomeActivity extends AppCompatActivity {
 
     private void launchPlayer(String guid, String title, String tvTitle, int epNum,
                               String poster, String cat, long ts, long dur, String parentGuid) {
+        // 自动续播对10分钟(<600s)以下视频不生效，避免MV类视频从末尾几秒开始播
+        if (dur > 0 && dur < 600) {
+            ts = 0;
+        }
         Intent intent = new Intent(this, PlayerActivity.class);
         intent.putExtra("guid", guid);
         intent.putExtra("title", title);
@@ -1625,6 +1674,175 @@ public class HomeActivity extends AppCompatActivity {
         intent.putExtra("ts", ts);
         intent.putExtra("duration", dur);
         if (parentGuid != null) intent.putExtra("parent_guid", parentGuid);
+        startActivity(intent);
+    }
+
+    /** 文件夹长按弹窗选择：全部播放 或 打开文件夹 */
+    private void showFolderActionDialog(final PlayListItem folderItem) {
+        if (folderItem == null) return;
+        final String title = folderItem.getDisplayTitle();
+        final String[] options = new String[] {
+                "▶ 全部播放 (连续播放此文件夹)",
+                "📂 打开文件夹"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("📁 " + title)
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        playAllInFolder(folderItem.guid, title);
+                    } else if (which == 1) {
+                        onItemClick(folderItem);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 媒体库长按弹窗选择：全部播放 或 打开媒体库 */
+    private void showLibActionDialog(final MediaDbItem lib) {
+        if (lib == null) return;
+        final String title = lib.title != null ? lib.title : "媒体库";
+        final String[] options = new String[] {
+                "▶ 全部播放 (连续播放此目录)",
+                "📂 打开目录"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("📁 " + title)
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        playAllInFolder(lib.guid, title);
+                    } else if (which == 1) {
+                        browseItems(lib.guid, lib.title);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 视频文件长按选择：连续播放 或 播放单个 */
+    private void showFileActionDialog(final PlayListItem fileItem) {
+        if (fileItem == null) return;
+        final String title = fileItem.getDisplayTitle();
+        boolean hasBrowseList = savedBrowseList != null && !savedBrowseList.isEmpty();
+        final String[] options = hasBrowseList
+                ? new String[] { "▶ 从此处开始连续播放", "▶ 仅播放此项", "ℹ️ 查看详情" }
+                : new String[] { "▶ 播放此项", "ℹ️ 查看详情" };
+        new AlertDialog.Builder(this)
+                .setTitle("🎞️ " + title)
+                .setItems(options, (dialog, which) -> {
+                    if (hasBrowseList) {
+                        if (which == 0) {
+                            startPlaylistPlayback(savedBrowseTitle != null ? savedBrowseTitle : "文件夹播放", savedBrowseList, fileItem.guid);
+                        } else if (which == 1) {
+                            launchPlayer(fileItem.guid, fileItem.title, fileItem.tvTitle != null ? fileItem.tvTitle : "",
+                                    fileItem.episodeNumber, fileItem.poster, fileItem.getCategoryLabel(),
+                                    fileItem.ts, fileItem.duration, fileItem.parentGuid);
+                        } else {
+                            showDetail(fileItem);
+                        }
+                    } else {
+                        if (which == 0) {
+                            launchPlayer(fileItem.guid, fileItem.title, fileItem.tvTitle != null ? fileItem.tvTitle : "",
+                                    fileItem.episodeNumber, fileItem.poster, fileItem.getCategoryLabel(),
+                                    fileItem.ts, fileItem.duration, fileItem.parentGuid);
+                        } else {
+                            showDetail(fileItem);
+                        }
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 加载并以播放列表方式连续播放指定文件夹 */
+    private void playAllInFolder(String folderGuid, final String folderTitle) {
+        if (folderGuid == null || folderGuid.isEmpty()) return;
+        Toast.makeText(this, "正在获取「" + folderTitle + "」文件列表...", Toast.LENGTH_SHORT).show();
+
+        String sortColumn = MediaSortHelper.getApiSortColumn(getSortField());
+        String sortType = MediaSortHelper.getApiSortType(getSortOrder());
+        final boolean useParent = folderGuid.startsWith("fv_");
+        ItemListRequest request = useParent
+                ? ItemListRequest.browseFolderByParent(folderGuid)
+                : new ItemListRequest(folderGuid, BROWSE_TYPES, true, sortColumn, sortType, 500);
+        request.pageSize = 500;
+
+        apiManager.getApi().getItemList(request).enqueue(new Callback<ApiResponse<ItemListResponse>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<ItemListResponse>> call,
+                                   Response<ApiResponse<ItemListResponse>> response) {
+                if (!response.isSuccessful() || response.body() == null || response.body().code != 0
+                        || response.body().data == null || response.body().data.list == null) {
+                    Toast.makeText(HomeActivity.this, "获取播放列表失败", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                List<PlayListItem> list = response.body().data.list;
+                startPlaylistPlayback(folderTitle, list, null);
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse<ItemListResponse>> call, Throwable t) {
+                Toast.makeText(HomeActivity.this, "加载失败: " + t.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    /** 播放当前已浏览文件夹中的所有文件 */
+    private void playAllCurrentFolder() {
+        if (savedBrowseList == null || savedBrowseList.isEmpty()) {
+            Toast.makeText(this, "当前文件夹为空", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        startPlaylistPlayback(savedBrowseTitle != null ? savedBrowseTitle : "当前目录", savedBrowseList, null);
+    }
+
+    /** 过滤出可播放项并按当前排序规则排序后，连续播放 */
+    private void startPlaylistPlayback(String playlistTitle, List<PlayListItem> rawList, String startGuid) {
+        if (rawList == null || rawList.isEmpty()) {
+            Toast.makeText(this, "该文件夹下没有可播放的视频", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<PlayListItem> playableList = new ArrayList<>();
+        for (PlayListItem pli : rawList) {
+            if (pli != null && !pli.isFolder() && !"TV".equals(pli.type)) {
+                playableList.add(pli);
+            }
+        }
+        if (playableList.isEmpty()) {
+            Toast.makeText(this, "该文件夹下没有可直接播放的视频（若有子文件夹请进入子文件夹播放）", Toast.LENGTH_LONG).show();
+            return;
+        }
+        // 按用户设置的排序规则排序
+        MediaSortHelper.sortItems(playableList, getSortField(), getSortOrder(), false);
+
+        int startIndex = 0;
+        if (startGuid != null) {
+            for (int i = 0; i < playableList.size(); i++) {
+                if (startGuid.equals(playableList.get(i).guid)) {
+                    startIndex = i;
+                    break;
+                }
+            }
+        }
+
+        PlaylistHolder.setPlaylist(playlistTitle, playableList);
+        PlayListItem first = playableList.get(startIndex);
+        long ts = first.ts;
+        if (first.duration > 0 && first.duration < 600) {
+            ts = 0;
+        }
+        Intent intent = new Intent(this, PlayerActivity.class);
+        intent.putExtra("guid", first.guid);
+        intent.putExtra("title", first.getDisplayTitle());
+        intent.putExtra("tv_title", first.tvTitle != null ? first.tvTitle : "");
+        intent.putExtra("episode_number", first.episodeNumber);
+        intent.putExtra("poster", first.poster);
+        intent.putExtra("category", first.getCategoryLabel());
+        intent.putExtra("ts", ts);
+        intent.putExtra("duration", first.duration);
+        intent.putExtra("parent_guid", first.parentGuid);
+        intent.putExtra("is_folder_playlist", true);
+        intent.putExtra("playlist_title", playlistTitle);
         startActivity(intent);
     }
 
@@ -1899,12 +2117,18 @@ public class HomeActivity extends AppCompatActivity {
         final String pTV = info.item != null && info.item.tvTitle != null ? info.item.tvTitle : "";
         final String pPoster = item.poster;
         final String pCat = item.getCategoryLabel();
-        final long pTs = info.ts > 0 ? info.ts : (item.ts > 0 ? item.ts : 0);
         // 总时长优先用 play/info 接口的 duration，其次是 runtime 转秒、item.duration
         long rawDur = info.item != null && info.item.duration > 0 ? info.item.duration : 0;
         if (rawDur <= 0 && info.item != null && info.item.runtime > 0) rawDur = info.item.runtime * 60L;
         if (rawDur <= 0) rawDur = item.duration;
         final long pDur = rawDur;
+
+        // 自动续播对10分钟(<600s)以下视频不生效，避免MV类视频从末尾几秒开始播
+        long initTs = info.ts > 0 ? info.ts : (item.ts > 0 ? item.ts : 0);
+        if (pDur > 0 && pDur < 600) {
+            initTs = 0;
+        }
+        final long pTs = initTs;
 
         final int pEp = item.episodeNumber;
         final int progressPct = pDur > 0 ? Math.max(0, Math.min(100, (int)(pTs * 100 / pDur))) : 0;

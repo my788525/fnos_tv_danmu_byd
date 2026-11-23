@@ -139,8 +139,14 @@ public class PlayerActivity extends AppCompatActivity {
         isHwDecode = "hardware".equals(prefs.getString("decoder_mode", "hardware"));
 
         itemGuid = getIntent().getStringExtra("guid");
-        seekTs = getIntent().getLongExtra("ts", 0) * 1000L;
         itemDuration = getIntent().getLongExtra("duration", 0);
+        long rawTs = getIntent().getLongExtra("ts", 0);
+        // 自动续播：不对10分钟(<600s)以下的视频生效，防止MV等短视频从最后几秒切歌处续播
+        if (itemDuration > 0 && itemDuration < 600) {
+            seekTs = 0;
+        } else {
+            seekTs = rawTs * 1000L;
+        }
         itemTitle = getIntent().getStringExtra("title");
         itemTV = getIntent().getStringExtra("tv_title");
         itemPoster = getIntent().getStringExtra("poster");
@@ -218,13 +224,23 @@ public class PlayerActivity extends AppCompatActivity {
                 outroSkipped = false;
                 itemGuid = guid;
                 itemTitle = title;
+                itemDuration = 0;
                 mediaGuid = null;
                 seeked = false;
                 seekTs = 0;
-                episodeManager.reset();
+                updateTitle();
                 loadPlayInfo();
             }
         }, btnEpisodeList, btnNextEp);
+
+        boolean isFolderPlaylist = getIntent().getBooleanExtra("is_folder_playlist", false);
+        if (isFolderPlaylist) {
+            java.util.List<com.fntv.app.api.model.PlayListItem> pl = PlaylistHolder.getPlaylist();
+            if (pl != null && !pl.isEmpty()) {
+                String plTitle = getIntent().getStringExtra("playlist_title");
+                episodeManager.setCustomPlaylist(pl, plTitle, itemGuid);
+            }
+        }
 
         btnPlayPause.setOnClickListener(v -> togglePlay());
         btnPlayCenter = findViewById(R.id.btnPlayCenter);
@@ -558,7 +574,17 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public void onPlaybackStateChanged(int s) {
                 tvBuffering.setVisibility(s == Player.STATE_BUFFERING ? View.VISIBLE : View.GONE);
                 if (s == Player.STATE_READY) {
-                    if (!seeked && seekTs > 0) { player.seekTo(seekTs); seeked = true; }
+                    if (!seeked && seekTs > 0) {
+                        long dMs = player.getDuration();
+                        long durSec = itemDuration > 0 ? itemDuration : (dMs > 0 ? dMs / 1000 : 0);
+                        if (durSec > 0 && durSec < 600) {
+                            Log.d(TAG, "视频时长小于10分钟 (" + durSec + "s)，跳过自动续播，从头播放");
+                            seekTs = 0;
+                        } else {
+                            player.seekTo(seekTs);
+                        }
+                        seeked = true;
+                    }
                     startSave(); updateTime();
                     if (firstReady) { saveProgress(); showCtrl(true); firstReady = false; }
                     qualityRetry = 0;
@@ -737,6 +763,8 @@ public class PlayerActivity extends AppCompatActivity {
                     if (info.item != null && info.item.tvTitle != null) itemTV = info.item.tvTitle;
                     if (info.item != null) itemTitle = info.item.title;
                     if (info.item != null && info.item.seasonNumber > 0) seasonNumber = info.item.seasonNumber;
+                    if (info.item != null && info.item.duration > 0) itemDuration = info.item.duration;
+                    if (itemDuration > 0 && itemDuration < 600) seekTs = 0;
                     if (info.item != null) getIntent().putExtra("episode_number", info.item.episodeNumber);
                     int epNum = info.item != null ? info.item.episodeNumber : 0;
                     String matchName = itemTV != null && !itemTV.isEmpty() ? itemTV : itemTitle;
@@ -855,7 +883,17 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public void onPlaybackStateChanged(int s) {
                 tvBuffering.setVisibility(s == Player.STATE_BUFFERING ? View.VISIBLE : View.GONE);
                 if (s == Player.STATE_READY) {
-                    if (!seeked && seekTs > 0) { player.seekTo(seekTs); seeked = true; }
+                    if (!seeked && seekTs > 0) {
+                        long dMs = player.getDuration();
+                        long durSec = itemDuration > 0 ? itemDuration : (dMs > 0 ? dMs / 1000 : 0);
+                        if (durSec > 0 && durSec < 600) {
+                            Log.d(TAG, "视频时长小于10分钟 (" + durSec + "s)，跳过自动续播，从头播放");
+                            seekTs = 0;
+                        } else {
+                            player.seekTo(seekTs);
+                        }
+                        seeked = true;
+                    }
                     if (firstReady) { showCtrl(true); firstReady = false; }
                     btnPlayPause.setText(player.isPlaying() ? "暂停" : "播放");
                     if (btnPlayCenter != null) btnPlayCenter.setText(player.isPlaying() ? "暂停" : "播放");
@@ -1934,6 +1972,9 @@ public class PlayerActivity extends AppCompatActivity {
     }
     @Override protected void onStop() { super.onStop(); saveProgress(); if (player != null) player.setPlayWhenReady(false); }
     @Override protected void onDestroy() {
+        if (getIntent().getBooleanExtra("is_folder_playlist", false)) {
+            PlaylistHolder.clear();
+        }
         saveProgress();
         super.onDestroy(); handler.removeCallbacksAndMessages(null);
         if (danmuManager != null) { danmuManager.destroy(); }

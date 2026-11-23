@@ -30,6 +30,8 @@ public class EpisodeManager {
     private List<PlayListItem> episodeList;
     private int currentEpIndex = -1;
     private boolean loadingEpisodes = false;
+    private boolean isCustomPlaylist = false;
+    private String playlistTitle;
     private final Callback cb;
     private final Button btnEpisodeList;
     private final Button btnNextEp;
@@ -44,12 +46,45 @@ public class EpisodeManager {
         this.btnNextEp = btnNextEp;
     }
 
-    /** 是否有下一集 */
+    /** 设置自定义文件夹/文件列表播放列表 */
+    public void setCustomPlaylist(List<PlayListItem> list, String title, String initialGuid) {
+        this.episodeList = list != null ? new java.util.ArrayList<>(list) : null;
+        this.isCustomPlaylist = true;
+        this.playlistTitle = title;
+        this.currentEpIndex = -1;
+        if (episodeList != null) {
+            for (int i = 0; i < episodeList.size(); i++) {
+                PlayListItem item = episodeList.get(i);
+                if (item != null && item.guid != null && item.guid.equals(initialGuid)) {
+                    currentEpIndex = i;
+                    break;
+                }
+            }
+            if (currentEpIndex < 0 && !episodeList.isEmpty()) {
+                currentEpIndex = 0;
+            }
+        }
+        if (btnEpisodeList != null) {
+            btnEpisodeList.setVisibility(View.VISIBLE);
+        }
+        updateBtnText();
+        updateNextBtn();
+    }
+
+    public boolean isCustomPlaylist() {
+        return isCustomPlaylist;
+    }
+
+    public String getPlaylistTitle() {
+        return playlistTitle;
+    }
+
+    /** 是否有下一集/下一首 */
     public boolean hasNext() {
         return episodeList != null && currentEpIndex >= 0 && currentEpIndex < episodeList.size() - 1;
     }
 
-    /** 是否有上一集 */
+    /** 是否有上一集/上一首 */
     public boolean hasPrev() {
         return episodeList != null && currentEpIndex > 0 && currentEpIndex < episodeList.size();
     }
@@ -62,6 +97,7 @@ public class EpisodeManager {
 
     /** 加载剧集列表 */
     public void loadList(String parentGuid) {
+        if (isCustomPlaylist) return; // 自定义文件夹播放列表无需从接口拉取电视剧集
         if (parentGuid == null || parentGuid.isEmpty()) return;
         loadingEpisodes = true;
         Log.d(TAG, "getEpisodeList 请求: " + cb.getBaseUrl() + "/v/api/v1/episode/list/" + parentGuid);
@@ -77,6 +113,7 @@ public class EpisodeManager {
                         if (resp.isSuccessful() && resp.body() != null && resp.body().code == 0
                                 && resp.body().data != null && !resp.body().data.isEmpty()) {
                             episodeList = resp.body().data;
+                            isCustomPlaylist = false;
                             currentEpIndex = -1;
                             int epNum = cb.getEpisodeNumber();
                             String itemGuid = cb.getItemGuid();
@@ -92,7 +129,8 @@ public class EpisodeManager {
                             }
                             Log.d(TAG, "getEpisodeList 成功: " + episodeList.size() + " 集, currentIdx=" + currentEpIndex
                                     + " epNum=" + epNum + " itemGuid=" + itemGuid);
-                            btnEpisodeList.setVisibility(View.VISIBLE);
+                            if (btnEpisodeList != null) btnEpisodeList.setVisibility(View.VISIBLE);
+                            updateBtnText();
                             updateNextBtn();
                         }
                     }
@@ -105,45 +143,57 @@ public class EpisodeManager {
                 });
     }
 
-    /** 播放下一个剧集 */
+    /** 播放下一个项目（下一集/下一首MV） */
     public void playNext() {
         if (!hasNext()) return;
         PlayListItem next = episodeList.get(currentEpIndex + 1);
         currentEpIndex++;
         currentGuid = next.guid;
-        currentTitle = next.title;
+        currentTitle = next.getDisplayTitle() != null ? next.getDisplayTitle() : next.title;
+        updateBtnText();
         updateNextBtn();
         cb.onSwitchEpisode(currentGuid, currentTitle);
     }
 
-    /** 播放上一个剧集（方向盘/遥控上键） */
+    /** 播放上一个项目（方向盘/遥控上键） */
     public void playPrev() {
         if (!hasPrev()) return;
         PlayListItem prev = episodeList.get(currentEpIndex - 1);
         currentEpIndex--;
         currentGuid = prev.guid;
-        currentTitle = prev.title;
+        currentTitle = prev.getDisplayTitle() != null ? prev.getDisplayTitle() : prev.title;
+        updateBtnText();
         updateNextBtn();
         cb.onSwitchEpisode(currentGuid, currentTitle);
     }
 
-    /** 显示剧集选择器 */
+    /** 显示剧集/播放列表选择器 */
     public void showPicker() {
         if (episodeList == null || episodeList.isEmpty()) return;
         final String[] items = new String[episodeList.size()];
         for (int i = 0; i < episodeList.size(); i++) {
             PlayListItem ep = episodeList.get(i);
-            items[i] = "EP" + (ep.episodeNumber > 0 ? ep.episodeNumber : (i + 1))
-                    + "  " + (ep.title != null ? ep.title : "");
+            String title = ep.getDisplayTitle() != null ? ep.getDisplayTitle() : (ep.title != null ? ep.title : "");
+            String dur = ep.getFormattedDuration();
+            if (isCustomPlaylist) {
+                items[i] = (i + 1) + ". " + title + (dur.isEmpty() ? "" : "  (" + dur + ")");
+            } else {
+                items[i] = "EP" + (ep.episodeNumber > 0 ? ep.episodeNumber : (i + 1))
+                        + "  " + title + (dur.isEmpty() ? "" : "  (" + dur + ")");
+            }
         }
+        String dlgTitle = isCustomPlaylist
+                ? ((playlistTitle != null && !playlistTitle.isEmpty()) ? ("播放列表 · " + playlistTitle) : "播放列表")
+                : "选择剧集";
         new android.app.AlertDialog.Builder(cb.getContext())
-                .setTitle("选择剧集")
+                .setTitle(dlgTitle)
                 .setItems(items, (dialog, which) -> {
                     if (which >= 0 && which < episodeList.size()) {
                         PlayListItem s = episodeList.get(which);
                         currentEpIndex = which;
                         currentGuid = s.guid;
-                        currentTitle = s.title;
+                        currentTitle = s.getDisplayTitle() != null ? s.getDisplayTitle() : s.title;
+                        updateBtnText();
                         updateNextBtn();
                         cb.onSwitchEpisode(currentGuid, currentTitle);
                     }
@@ -152,14 +202,40 @@ public class EpisodeManager {
                 .show();
     }
 
-    /** 重置状态（切换到新剧时调用） */
+    /** 更新按钮文字 */
+    private void updateBtnText() {
+        if (btnEpisodeList != null) {
+            if (isCustomPlaylist && episodeList != null) {
+                btnEpisodeList.setText("列表 (" + (currentEpIndex + 1) + "/" + episodeList.size() + ")");
+            } else {
+                btnEpisodeList.setText("剧集");
+            }
+        }
+        if (btnNextEp != null) {
+            btnNextEp.setText(isCustomPlaylist ? "下一首" : "下一集");
+        }
+    }
+
+    /** 重置状态（仅对非自定义列表重置；若是自定义列表则保留） */
     public void reset() {
+        if (isCustomPlaylist) return;
+        episodeList = null;
+        currentEpIndex = -1;
+        loadingEpisodes = false;
+    }
+
+    /** 强制清除所有播放列表 */
+    public void clear() {
+        isCustomPlaylist = false;
+        playlistTitle = null;
         episodeList = null;
         currentEpIndex = -1;
         loadingEpisodes = false;
     }
 
     private void updateNextBtn() {
-        btnNextEp.setVisibility(hasNext() ? View.VISIBLE : View.GONE);
+        if (btnNextEp != null) {
+            btnNextEp.setVisibility(hasNext() ? View.VISIBLE : View.GONE);
+        }
     }
 }
