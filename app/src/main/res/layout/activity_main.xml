@@ -43,12 +43,12 @@
                 android:textSize="22sp"
                 android:textStyle="bold" />
 
-            <!-- 应用名称（无"飞牛影视"文字，仅用简洁图标） -->
+            <!-- 应用名称 -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="24dp"
-                android:text="飞牛影视BYD专用版"
+                android:text="飞牛Lite"
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp" />
 

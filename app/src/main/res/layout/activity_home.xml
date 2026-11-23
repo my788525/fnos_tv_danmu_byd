@@ -26,7 +26,7 @@ DPAD 遥控器友好
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="飞牛影视 BYD"
+            android:text="飞牛Lite"
             android:textColor="@color/text_white"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -486,6 +486,37 @@ DPAD 遥控器友好
 
                         </RelativeLayout>
 
+                        <!-- 目录层级模式：真实文件夹层级 vs 全库平铺 -->
+                        <RelativeLayout
+                            android:id="@+id/rlFolderHierarchySetting"
+                            android:layout_width="match_parent"
+                            android:layout_height="52dp"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/bg_input"
+                            android:focusable="true"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_centerVertical="true"
+                                android:text="目录浏览层级"
+                                android:textColor="@color/text_primary"
+                                android:textSize="14sp" />
+
+                            <TextView
+                                android:id="@+id/tvFolderHierarchyValue"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_alignParentRight="true"
+                                android:layout_centerVertical="true"
+                                android:text="真实文件夹层级"
+                                android:textColor="@color/colorAccent"
+                                android:textSize="14sp" />
+
+                        </RelativeLayout>
+
                     </LinearLayout>
 
                     <!-- 关于 -->
@@ -516,7 +547,7 @@ DPAD 遥控器友好
                             android:id="@+id/tvVersionName"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="飞牛影视BYD专用版 v1.0"
+                            android:text="飞牛Lite v1.0"
                             android:textColor="@color/text_secondary"
                             android:textSize="13sp" />
 

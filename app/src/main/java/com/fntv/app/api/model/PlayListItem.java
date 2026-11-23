@@ -45,6 +45,15 @@ public class PlayListItem {
     @SerializedName("parent_guid")
     public String parentGuid;
 
+    @SerializedName("path")
+    public String path;
+
+    @SerializedName("file_path")
+    public String filePath;
+
+    @SerializedName("folder_path")
+    public String folderPath;
+
     @SerializedName("ancestor_name")
     public String ancestorName;   // 如 "日漫"
 
@@ -167,6 +176,14 @@ public class PlayListItem {
             return ancestorCategory;
         }
         return parentTitle != null ? parentTitle : "未分类";
+    }
+
+    /** 获取文件路径或目录路径（如果有） */
+    public String getDisplayFilePath() {
+        if (filePath != null && !filePath.trim().isEmpty()) return filePath.trim();
+        if (path != null && !path.trim().isEmpty()) return path.trim();
+        if (folderPath != null && !folderPath.trim().isEmpty()) return folderPath.trim();
+        return null;
     }
 
     /** 获取最佳排序标题 */

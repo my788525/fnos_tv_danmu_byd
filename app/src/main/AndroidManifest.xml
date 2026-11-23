@@ -10,7 +10,7 @@
         android:name="androidx.multidex.MultiDexApplication"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:label="飞牛影视BYD专用版"
+        android:label="飞牛Lite"
         android:theme="@style/Theme.FntvApp"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"

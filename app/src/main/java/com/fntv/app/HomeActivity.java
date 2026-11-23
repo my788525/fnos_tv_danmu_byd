@@ -62,9 +62,10 @@ public class HomeActivity extends AppCompatActivity {
     public static final String PREF_SORT_FIELD = "pref_sort_field"; // 0=名称, 1=修改时间, 2=创建时间
     public static final String PREF_SORT_ORDER = "pref_sort_order"; // 0=正序(ASC), 1=反序(DESC)
     public static final String PREF_FOLDERS_FIRST = "pref_folders_first"; // 默认 true
+    public static final String PREF_FOLDER_HIERARCHY = "pref_folder_hierarchy"; // 真实文件夹路径层级浏览，默认 true
 
-    private RelativeLayout rlViewModeSetting, rlSortFieldSetting, rlSortOrderSetting, rlFoldersFirstSetting;
-    private TextView tvViewModeValue, tvSortFieldValue, tvSortOrderValue, tvFoldersFirstValue;
+    private RelativeLayout rlViewModeSetting, rlSortFieldSetting, rlSortOrderSetting, rlFoldersFirstSetting, rlFolderHierarchySetting;
+    private TextView tvViewModeValue, tvSortFieldValue, tvSortOrderValue, tvFoldersFirstValue, tvFolderHierarchyValue;
 
     public static class FolderNavState {
         public String guid;
@@ -96,6 +97,10 @@ public class HomeActivity extends AppCompatActivity {
 
     public boolean isFoldersFirst() {
         return prefs != null ? prefs.getBoolean(PREF_FOLDERS_FIRST, true) : true;
+    }
+
+    public boolean isFolderHierarchyMode() {
+        return prefs != null ? prefs.getBoolean(PREF_FOLDER_HIERARCHY, true) : true;
     }
 
     private int currentTab = 0;
@@ -232,10 +237,12 @@ public class HomeActivity extends AppCompatActivity {
         tvSortOrderValue = findViewById(R.id.tvSortOrderValue);
         rlFoldersFirstSetting = findViewById(R.id.rlFoldersFirstSetting);
         tvFoldersFirstValue = findViewById(R.id.tvFoldersFirstValue);
+        rlFolderHierarchySetting = findViewById(R.id.rlFolderHierarchySetting);
+        tvFolderHierarchyValue = findViewById(R.id.tvFolderHierarchyValue);
 
         TextView tvVersion = findViewById(R.id.tvVersionName);
         try {
-            tvVersion.setText("飞牛影视BYD专用版 v" + getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
+            tvVersion.setText("飞牛Lite v" + getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
         } catch (Exception ignored) {}
     }
 
@@ -1019,7 +1026,9 @@ public class HomeActivity extends AppCompatActivity {
 
 
     private void browseItems(String ancestorGuid, String title) {
-        browseItemsInContainer(ancestorGuid, title, moviesContainer, tvMoviesLoading, null, false);
+        LinearLayout container = (currentTab == 1) ? libraryContainer : moviesContainer;
+        TextView loading = (currentTab == 1) ? tvLibraryLoading : tvMoviesLoading;
+        browseItemsInContainer(ancestorGuid, title, container, loading, null, isFolderHierarchyMode());
     }
 
     private void browseItemsInContainer(String ancestorGuid, String title,
@@ -1047,11 +1056,12 @@ public class HomeActivity extends AppCompatActivity {
         String sortColumn = MediaSortHelper.getApiSortColumn(getSortField());
         String sortType = MediaSortHelper.getApiSortType(getSortOrder());
         final boolean[] browseRetried = {false};
-        // FnOS 嵌套文件夹 guid 以 fv_ 开头，必须用 parent_guid 列出子项；顶层媒体库源 guid 用 ancestor_guid。
+        // FnOS 嵌套文件夹 guid 以 fv_ 开头，必须用 parent_guid 列出子项；
+        // 顶层媒体库源 guid：若开启文件夹层级模式，必须传递 exclude_grouped_video=0 才能获取真实目录结构与 Directory
         final boolean useParent = ancestorGuid != null && ancestorGuid.startsWith("fv_");
         ItemListRequest request = useParent
                 ? ItemListRequest.browseFolderByParent(ancestorGuid)
-                : new ItemListRequest(ancestorGuid, BROWSE_TYPES, true, sortColumn, sortType, 100);
+                : new ItemListRequest(ancestorGuid, BROWSE_TYPES, !isFolderHierarchyMode(), sortColumn, sortType, 100);
         Log.d("Overview", "browseItems: guid=" + ancestorGuid + " useParent=" + useParent);
         Callback<ApiResponse<ItemListResponse>> browseCb = new Callback<ApiResponse<ItemListResponse>>() {
             @Override
@@ -1072,8 +1082,30 @@ public class HomeActivity extends AppCompatActivity {
                     Log.d("Overview", "browseItems: got " + list.size() + " items, total=" + total
                             + " | types: " + typeSummary.toString());
 
-                    // 非文件夹形式的类别不展示子文件夹(Directory)卡片；仅文件夹型类别才展示子文件夹。
-                    if (!parentIsFolder) {
+                    // 真实文件夹层级过滤：
+                    // 如果开启文件夹层级模式，并且结果中包含子文件夹，
+                    // 过滤掉那些 parentGuid 属于更深层子文件夹的项目，只保留直属于当前层级的项（直属子文件夹与直属文件）
+                    if (isFolderHierarchyMode()) {
+                        java.util.Set<String> subFolderGuids = new java.util.HashSet<>();
+                        for (PlayListItem pli : list) {
+                            if (pli.isFolder() && pli.guid != null && !pli.guid.isEmpty()) {
+                                subFolderGuids.add(pli.guid);
+                            }
+                        }
+                        if (!subFolderGuids.isEmpty()) {
+                            List<PlayListItem> directChildren = new ArrayList<>();
+                            for (PlayListItem pli : list) {
+                                if (pli.parentGuid != null && subFolderGuids.contains(pli.parentGuid)) {
+                                    continue;
+                                }
+                                directChildren.add(pli);
+                            }
+                            list = directChildren;
+                        }
+                    }
+
+                    // 仅在非文件夹层级模式且非文件夹页面时，过滤掉子文件夹
+                    if (!parentIsFolder && !isFolderHierarchyMode()) {
                         List<PlayListItem> filtered = new ArrayList<>();
                         for (PlayListItem pli : list) {
                             if (!pli.isFolder()) filtered.add(pli);
@@ -1092,7 +1124,7 @@ public class HomeActivity extends AppCompatActivity {
                     if (!browseRetried[0] && response.body() != null && response.body().code == 0) {
                         browseRetried[0] = true;
                         ItemListRequest altReq = useParent
-                                ? new ItemListRequest(ancestorGuid, BROWSE_TYPES, false, sortColumn, sortType, 50)
+                                ? new ItemListRequest(ancestorGuid, BROWSE_TYPES, !isFolderHierarchyMode(), sortColumn, sortType, 50)
                                 : ItemListRequest.browseFolderByParent(ancestorGuid);
                         Log.d("Overview", "browseItems: 空列表，回退另一种 guid 形态 guid=" + ancestorGuid
                                 + " useParent=" + useParent);
@@ -1428,7 +1460,12 @@ public class HomeActivity extends AppCompatActivity {
 
         TextView title = new TextView(this);
         title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        title.setText(".. [返回上一级文件夹]");
+        if (!folderNavStack.isEmpty()) {
+            FolderNavState parentState = folderNavStack.peek();
+            title.setText(".. [返回上一级: " + (parentState.title != null ? parentState.title : "目录") + "]");
+        } else {
+            title.setText(".. [返回上一级列表]");
+        }
         title.setTextSize(15);
         title.setTextColor(0xFF81C784);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -1449,11 +1486,21 @@ public class HomeActivity extends AppCompatActivity {
     /** 渲染当前浏览：标题 + 排序栏 + 列表/网格正文（按 isListViewMode() 切换） */
     private void renderBrowseAll(ViewGroup container, List<PlayListItem> list, String title) {
         container.removeAllViews();
+        StringBuilder breadcrumb = new StringBuilder();
+        if (folderNavStack != null && !folderNavStack.isEmpty()) {
+            for (FolderNavState st : folderNavStack) {
+                if (st.title != null && !st.title.isEmpty()) {
+                    breadcrumb.append(st.title).append(" / ");
+                }
+            }
+        }
+        breadcrumb.append(title != null ? title : "");
+
         TextView h = new TextView(HomeActivity.this);
         h.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         h.setPadding(6, 8, 6, 4);
-        h.setText("📁 " + title + " (" + list.size() + "项)");
+        h.setText("📁 " + breadcrumb.toString() + " (" + list.size() + "项)");
         h.setTextColor(0xFFEEEEEE);
         h.setTextSize(15);
         h.setTypeface(Typeface.DEFAULT_BOLD);
@@ -1614,6 +1661,14 @@ public class HomeActivity extends AppCompatActivity {
         if (!date.isEmpty()) {
             subText.append(" · ").append(date);
         }
+        String fPath = item.getDisplayFilePath();
+        if (fPath != null && !fPath.isEmpty()) {
+            int lastSep = Math.max(fPath.lastIndexOf('/'), fPath.lastIndexOf('\\'));
+            String fName = (lastSep >= 0 && lastSep < fPath.length() - 1) ? fPath.substring(lastSep + 1) : fPath;
+            if (!fName.equalsIgnoreCase(item.getDisplayTitle())) {
+                subText.append(" · ").append(fName);
+            }
+        }
         TextView tvSub = new TextView(this);
         tvSub.setText(subText.toString());
         tvSub.setTextSize(12);
@@ -1679,6 +1734,7 @@ public class HomeActivity extends AppCompatActivity {
     /** 判断顶层媒体库是否为“文件夹型”（文件夹型展示内部子文件夹，内容型隐藏） */
     private boolean isLibFolderForm(MediaDbItem lib) {
         if (lib == null) return false;
+        if (isFolderHierarchyMode()) return true;
         String c = lib.category;
         if (c == null) return false;
         c = c.trim();
@@ -2844,6 +2900,35 @@ public class HomeActivity extends AppCompatActivity {
                     tvFoldersFirstValue.setText(next ? "开启" : "关闭");
                 }
                 onSortChanged();
+            });
+        }
+
+        if (tvFolderHierarchyValue != null) {
+            tvFolderHierarchyValue.setText(isFolderHierarchyMode() ? "真实文件夹层级" : "全库平铺聚合");
+        }
+        if (rlFolderHierarchySetting != null) {
+            rlFolderHierarchySetting.setOnClickListener(v -> {
+                String[] items = {"真实文件夹层级 (逐级展开目录，不打散平铺) [推荐]", "全库平铺聚合 (媒体库内所有影视汇集平铺)"};
+                int cur = isFolderHierarchyMode() ? 0 : 1;
+                new AlertDialog.Builder(this)
+                        .setTitle("目录浏览层级")
+                        .setSingleChoiceItems(items, cur, (dialog, which) -> {
+                            boolean mode = (which == 0);
+                            prefs.edit().putBoolean(PREF_FOLDER_HIERARCHY, mode).apply();
+                            if (tvFolderHierarchyValue != null) {
+                                tvFolderHierarchyValue.setText(mode ? "真实文件夹层级" : "全库平铺聚合");
+                            }
+                            dialog.dismiss();
+                            if (savedBrowseGuid != null && currentBrowseContainer != null) {
+                                reFetchLibraryItems();
+                            } else if (currentTab == 1) {
+                                loadMediaLibraries();
+                            } else if (currentTab == 0 && showingOverview) {
+                                showOverview();
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
             });
         }
 
