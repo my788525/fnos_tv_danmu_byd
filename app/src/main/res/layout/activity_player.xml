@@ -157,6 +157,20 @@
             android:textSize="12sp"
             android:gravity="center"
             android:text="" />
+
+        <TextView
+            android:id="@+id/tvBannerNextInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:maxWidth="520dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#FF4DA6FF"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:visibility="gone"
+            android:text="" />
     </LinearLayout>
 
     <!-- 弹幕状态提示（覆盖在视频上） -->

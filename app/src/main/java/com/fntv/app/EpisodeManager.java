@@ -32,6 +32,7 @@ public class EpisodeManager {
         String getParentTitle();
         boolean isForceSingle();
         void onCustomPlaylistLoaded(String folderGuid);
+        void onEpisodesLoaded();
     }
 
     private List<PlayListItem> episodeList;
@@ -74,6 +75,7 @@ public class EpisodeManager {
         PlaylistHolder.setPlaylist(title, this.episodeList);
         if (cb != null) {
             cb.onCustomPlaylistLoaded(cb.getParentGuid());
+            cb.onEpisodesLoaded();
         }
         if (btnEpisodeList != null) {
             btnEpisodeList.setVisibility(View.VISIBLE);
@@ -103,6 +105,68 @@ public class EpisodeManager {
             return episodeList.get(currentEpIndex);
         }
         return null;
+    }
+
+    /** 同步当前项索引 */
+    public void syncCurrentIndex() {
+        if (episodeList == null || episodeList.isEmpty() || cb == null) return;
+        String itemGuid = cb.getItemGuid();
+        if (itemGuid != null) {
+            for (int i = 0; i < episodeList.size(); i++) {
+                PlayListItem item = episodeList.get(i);
+                if (item != null && itemGuid.equals(item.guid)) {
+                    currentEpIndex = i;
+                    break;
+                }
+            }
+        }
+        if (currentEpIndex < 0 && cb.getEpisodeNumber() > 0) {
+            int epNum = cb.getEpisodeNumber();
+            for (int i = 0; i < episodeList.size(); i++) {
+                PlayListItem item = episodeList.get(i);
+                if (item != null && item.episodeNumber == epNum) {
+                    currentEpIndex = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    /** 获取下一个视频/剧集项（若自定义列表支持循环，在末尾时返回第0项） */
+    public PlayListItem getNextEpisodeItem() {
+        if (episodeList == null || episodeList.isEmpty()) return null;
+        if (currentEpIndex < 0) {
+            syncCurrentIndex();
+        }
+        int nextIndex = currentEpIndex + 1;
+        if (nextIndex >= episodeList.size()) {
+            if (isCustomPlaylist) {
+                nextIndex = 0; // 文件夹循环连播
+            } else {
+                return null;
+            }
+        }
+        if (nextIndex >= 0 && nextIndex < episodeList.size()) {
+            return episodeList.get(nextIndex);
+        }
+        return null;
+    }
+
+    /** 获取下一个视频/剧集项索引 */
+    public int getNextEpIndex() {
+        if (episodeList == null || episodeList.isEmpty()) return -1;
+        if (currentEpIndex < 0) {
+            syncCurrentIndex();
+        }
+        int nextIndex = currentEpIndex + 1;
+        if (nextIndex >= episodeList.size()) {
+            if (isCustomPlaylist) {
+                return 0;
+            } else {
+                return -1;
+            }
+        }
+        return nextIndex;
     }
 
     /** 是否有下一集/下一首 */
@@ -162,6 +226,7 @@ public class EpisodeManager {
                             if (btnEpisodeList != null) btnEpisodeList.setVisibility(View.VISIBLE);
                             updateBtnText();
                             updateNextBtn();
+                            if (cb != null) cb.onEpisodesLoaded();
                         } else {
                             // 不是电视剧集，或者剧集列表为空：尝试加载同文件夹下的同级视频
                             loadFolderSiblings(parentGuid);

@@ -43,9 +43,9 @@ public class PlayerActivity extends AppCompatActivity {
     private ImageView btnLock;
     private TextView tvTitle, tvDanmuStatus, tvDanmuMatch, tvSpeedHint, infoTextAudio, infoTextExtra;
     private View llTopVideoInfoBanner;
-    private TextView tvBannerMainTitle, tvBannerSubInfo;
+    private TextView tvBannerMainTitle, tvBannerSubInfo, tvBannerNextInfo;
     private Button btnCloudMode, btnBrightness, btnSkip;
-    private boolean introSkipped = false, outroSkipped = false;
+    private boolean introSkipped = false, outroSkipped = false, endingBannerShown = false;
     private float speedBeforeLongPress = 1.0f;
     private DanmuView danmuView;
     private View controller, infoPanel, topBar;
@@ -197,6 +197,7 @@ public class PlayerActivity extends AppCompatActivity {
         llTopVideoInfoBanner = findViewById(R.id.llTopVideoInfoBanner);
         tvBannerMainTitle = findViewById(R.id.tvBannerMainTitle);
         tvBannerSubInfo = findViewById(R.id.tvBannerSubInfo);
+        tvBannerNextInfo = findViewById(R.id.tvBannerNextInfo);
         topBar = findViewById(R.id.topBar);
         controller = findViewById(R.id.controller);
         controller.setOnTouchListener((v, e) -> true);
@@ -250,10 +251,19 @@ public class PlayerActivity extends AppCompatActivity {
                 if (fGuid != null && !fGuid.isEmpty()) {
                     folderGuid = fGuid;
                 }
+                if (llTopVideoInfoBanner != null && llTopVideoInfoBanner.getVisibility() == View.VISIBLE) {
+                    showTopVideoBanner();
+                }
+            }
+            @Override public void onEpisodesLoaded() {
+                if (llTopVideoInfoBanner != null && llTopVideoInfoBanner.getVisibility() == View.VISIBLE) {
+                    showTopVideoBanner();
+                }
             }
             @Override public void onSwitchEpisode(String guid, String title) {
                 introSkipped = false;
                 outroSkipped = false;
+                endingBannerShown = false;
                 itemGuid = guid;
                 itemTitle = title;
                 itemDuration = 0;
@@ -840,6 +850,7 @@ public class PlayerActivity extends AppCompatActivity {
     /** 开始播放（加载到 ExoPlayer） */
     private void startPlayback() {
         if (mediaGuid == null) return;
+        endingBannerShown = false;
         if (qualityRetry == 0) baseQualityIndex = cloudStreamManager.getQualityIndex();
         CloudStreamManager.PlaybackConfig cfg = cloudStreamManager.getPlaybackConfig(baseUrl, mediaGuid);
         OkHttpExoDataSource.setChunkedMode(cfg.chunkedModeSize);
@@ -1389,13 +1400,55 @@ public class PlayerActivity extends AppCompatActivity {
 
         tvBannerSubInfo.setText(sub.toString().trim());
 
+        // 3. 下一个视频/剧集信息
+        if (tvBannerNextInfo != null) {
+            PlayListItem nextItem = episodeManager != null ? episodeManager.getNextEpisodeItem() : null;
+            if (nextItem != null) {
+                String nextTitle = nextItem.getDisplayTitle() != null ? nextItem.getDisplayTitle() : (nextItem.title != null ? nextItem.title : "");
+                int total = episodeManager.getEpisodeCount();
+                int nextIdx = episodeManager.getNextEpIndex();
+                StringBuilder nb = new StringBuilder();
+                nb.append("⏭ ");
+                if (isFolderPlaylist || episodeManager.isCustomPlaylist()) {
+                    nb.append("下一首");
+                    if (total > 0 && nextIdx >= 0) {
+                        nb.append(" (").append(nextIdx + 1).append("/").append(total).append("): ");
+                    } else {
+                        nb.append(": ");
+                    }
+                } else {
+                    nb.append("下一集");
+                    if (nextItem.episodeNumber > 0) {
+                        nb.append(" (EP").append(nextItem.episodeNumber).append("): ");
+                    } else if (total > 0 && nextIdx >= 0) {
+                        nb.append(" (").append(nextIdx + 1).append("/").append(total).append("): ");
+                    } else {
+                        nb.append(": ");
+                    }
+                }
+                nb.append(nextTitle);
+                String durStr = nextItem.getFormattedDuration();
+                if (durStr != null && !durStr.isEmpty()) {
+                    nb.append("  (").append(durStr).append(")");
+                }
+                tvBannerNextInfo.setText(nb.toString());
+                tvBannerNextInfo.setVisibility(View.VISIBLE);
+            } else if (episodeManager != null && episodeManager.getEpisodeCount() > 1 && !episodeManager.hasNext()) {
+                String lastLabel = (isFolderPlaylist || episodeManager.isCustomPlaylist()) ? "⏭ 已是最后一首" : "⏭ 已是最后一集";
+                tvBannerNextInfo.setText(lastLabel);
+                tvBannerNextInfo.setVisibility(View.VISIBLE);
+            } else {
+                tvBannerNextInfo.setVisibility(View.GONE);
+            }
+        }
+
         handler.removeCallbacks(hideBannerRunnable);
         llTopVideoInfoBanner.animate().cancel();
         llTopVideoInfoBanner.setAlpha(1.0f);
         llTopVideoInfoBanner.setVisibility(View.VISIBLE);
 
-        // 15秒后自动隐藏
-        handler.postDelayed(hideBannerRunnable, 15000);
+        // 10秒后自动隐藏
+        handler.postDelayed(hideBannerRunnable, 10000);
     }
 
     private void showCtrl(boolean show) {
@@ -1487,6 +1540,27 @@ public class PlayerActivity extends AppCompatActivity {
                 if (episodeManager != null && episodeManager.hasNext())
                     handler.postDelayed(() -> episodeManager.playNext(), 1000);
                 }
+            }
+        }
+        // 实时监测视频结尾10秒（在结尾10秒自动弹出顶部信息与下一个视频）
+        if (dur > 15000) {
+            long effectiveEndMs = dur;
+            SharedPreferences sp = getSharedPreferences("fntv_prefs", MODE_PRIVATE);
+            String sid = parentGuid != null && !parentGuid.isEmpty() ? parentGuid : (itemTV != null ? itemTV : null);
+            if (sid != null) {
+                int outroSec = sp.getInt("skip_" + sid + "_outro", 0);
+                if (outroSec > 0 && dur > (outroSec + 15) * 1000L) {
+                    effectiveEndMs = dur - outroSec * 1000L;
+                }
+            }
+            long remainingMs = effectiveEndMs - cur;
+            if (remainingMs <= 10000 && remainingMs > 0) {
+                if (!endingBannerShown) {
+                    endingBannerShown = true;
+                    showTopVideoBanner();
+                }
+            } else if (remainingMs > 12000) {
+                endingBannerShown = false;
             }
         }
         handler.postDelayed(timeR, 200);
