@@ -1554,32 +1554,51 @@ public class PlayerActivity extends AppCompatActivity {
             if (episodeManager != null && episodeManager.hasNext()) episodeManager.playNext();
             return true;
         }
+        // 遥控器独立多媒体按键支持
+        if (k == KeyEvent.KEYCODE_MEDIA_PLAY) {
+            if (player != null && !player.isPlaying()) togglePlay();
+            return true;
+        }
+        if (k == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+            if (player != null && player.isPlaying()) togglePlay();
+            return true;
+        }
+        if (k == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || k == KeyEvent.KEYCODE_HEADSETHOOK) {
+            togglePlay();
+            return true;
+        }
+        if (k == KeyEvent.KEYCODE_MEDIA_STOP) {
+            restoreOrientation();
+            finish();
+            return true;
+        }
+
         if (ctrlVis) {
             switch (k) {
                 case KeyEvent.KEYCODE_BACK:
                     if (infoVis) { toggleInfo(); return true; }
-                    // 有控件焦点 → 清掉，自动回退到 playerView
-                    if (controller.hasFocus() || btnDanmu.hasFocus() || btnLock.hasFocus() || btnCloudMode.hasFocus() || btnBrightness.hasFocus() || btnSkip.hasFocus() || topBar.hasFocus() || btnBack.hasFocus()) {
-                        topBar.clearFocus();
-                        controller.clearFocus();
-                        btnDanmu.clearFocus();
-                        btnLock.clearFocus();
-                        return true;
-                    }
-                    // 无按钮焦点（playerView 或其它）→ 收起控制栏
+                    // 控制栏展示状态下，按返回键直接收起控制栏，回归纯净全屏
                     showCtrl(false);
                     return true;
-                // LEFT/RIGHT 由 SeekBar 自身处理（已设 keyProgressIncrement=5000）
                 case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_ENTER:
-                    if (seekBar.hasFocus() || btnRewind.hasFocus() || btnForward.hasFocus()
-                            || btnSpeed.hasFocus() || btnRatio.hasFocus() || btnInfo.hasFocus()
-                            || btnEpisodeList.hasFocus() || btnNextEp.hasFocus() || btnBrightness.hasFocus() || btnSkip.hasFocus()) {
-                        return true;
+                    View curFocus = getCurrentFocus();
+                    // 若当前已有具体子控件（如播放/暂停、快进退、选集、画质等）持有焦点，交由该控件处理点击
+                    if (curFocus != null && curFocus != playerView && curFocus != controller && curFocus != topBar) {
+                        return super.onKeyDown(k, e);
                     }
-                    togglePlay(); return true;
+                    togglePlay();
+                    return true;
                 case KeyEvent.KEYCODE_DPAD_UP:
                     // 顶栏按上→收起，其余情况交给系统焦点导航
-                    if (topBar.hasFocus() || btnCloudMode.hasFocus()) {
+                    if (topBar.hasFocus() || btnCloudMode.hasFocus() || btnBack.hasFocus() || btnLock.hasFocus()) {
+                        showCtrl(false);
+                        return true;
+                    }
+                    return super.onKeyDown(k, e);
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    // 底栏主控制区按下→收起控制栏，回归纯净全屏
+                    View fDown = getCurrentFocus();
+                    if (fDown != null && fDown.getId() == R.id.btnPlayPause) {
                         showCtrl(false);
                         return true;
                     }
@@ -1601,6 +1620,7 @@ public class PlayerActivity extends AppCompatActivity {
                     return true;
                 case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_ENTER:
                 case KeyEvent.KEYCODE_DPAD_UP:
+                case KeyEvent.KEYCODE_DPAD_DOWN:
                     showCtrl(true);
                     btnPlayPause.postDelayed(new Runnable() { @Override public void run() { btnPlayPause.requestFocus(); } }, 50);
                     return true;

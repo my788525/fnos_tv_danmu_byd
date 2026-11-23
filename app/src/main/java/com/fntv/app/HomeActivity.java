@@ -102,6 +102,7 @@ public class HomeActivity extends AppCompatActivity {
     private final List<MediaDbItem> mediaLibraries = new ArrayList<>();
     private boolean showingOverview = true;
     private boolean showingEpisodes = false;
+    private boolean showingDetail = false;
     private boolean loadingPreviews = false;
 
     // 媒体库浏览排序状态
@@ -292,6 +293,8 @@ public class HomeActivity extends AppCompatActivity {
     private void loadOverview() {
         Log.d("Overview", "loadOverview start  t=" + (System.currentTimeMillis() - t0) + "ms");
         showingOverview = true;
+        showingDetail = false;
+        showingEpisodes = false;
         overviewBuilt = false;
         loadingPreviews = false;
         tvMoviesLoading.setVisibility(View.VISIBLE);
@@ -345,6 +348,8 @@ public class HomeActivity extends AppCompatActivity {
         showingEpisodes = false;
         moviesContainer.removeAllViews();
         showingOverview = true;
+        showingDetail = false;
+        showingEpisodes = false;
         overviewBuilt = true;
 
         if (isListViewMode()) {
@@ -398,6 +403,8 @@ public class HomeActivity extends AppCompatActivity {
     private void renderOverviewList() {
         moviesContainer.removeAllViews();
         showingOverview = true;
+        showingDetail = false;
+        showingEpisodes = false;
         overviewBuilt = true;
 
         // 顶部控制栏
@@ -970,6 +977,9 @@ public class HomeActivity extends AppCompatActivity {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 title.setSelected(hasFocus);
+                card.setScaleX(hasFocus ? 1.05f : 1.0f);
+                card.setScaleY(hasFocus ? 1.05f : 1.0f);
+                card.setBackgroundResource(hasFocus ? R.drawable.bg_input : R.drawable.bg_media_card);
             }
         });
 
@@ -1296,6 +1306,21 @@ public class HomeActivity extends AppCompatActivity {
         playAllBtn.setOnClickListener(v -> playAllCurrentFolder());
         bar.addView(playAllBtn);
 
+        // 遥控器水平焦点链：保证左右导航在各按钮间丝滑连贯切换
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            sortColumnBtn.setId(View.generateViewId());
+            sortOrderBtn.setId(View.generateViewId());
+            viewToggle.setId(View.generateViewId());
+            playAllBtn.setId(View.generateViewId());
+
+            sortColumnBtn.setNextFocusRightId(sortOrderBtn.getId());
+            sortOrderBtn.setNextFocusLeftId(sortColumnBtn.getId());
+            sortOrderBtn.setNextFocusRightId(viewToggle.getId());
+            viewToggle.setNextFocusLeftId(sortOrderBtn.getId());
+            viewToggle.setNextFocusRightId(playAllBtn.getId());
+            playAllBtn.setNextFocusLeftId(viewToggle.getId());
+        }
+
         return bar;
     }
 
@@ -1441,6 +1466,19 @@ public class HomeActivity extends AppCompatActivity {
 
         renderBrowseBody(container, list);
         new Handler(Looper.getMainLooper()).post(() -> loadImagesLazily(container, 0));
+        // 遥控器焦点兜底：新页面渲染后确保首个可聚焦控件获得高亮焦点
+        container.post(() -> {
+            View f = container.findFocus();
+            if (f == null) {
+                for (int i = 0; i < container.getChildCount(); i++) {
+                    View cv = container.getChildAt(i);
+                    if (cv != null && cv.isFocusable()) {
+                        cv.requestFocus();
+                        break;
+                    }
+                }
+            }
+        });
     }
 
     private void renderBrowseBody(ViewGroup container, List<PlayListItem> list) {
@@ -1854,7 +1892,7 @@ public class HomeActivity extends AppCompatActivity {
         switchTab(0);
         detailInLibrary = false;
         detailContainer = moviesContainer;
-        savedBrowseList = null; savedBrowseGuid = null;
+        showingDetail = true;
         showingOverview = false;
         showingEpisodes = false;
         moviesContainer.removeAllViews();
@@ -2213,6 +2251,7 @@ public class HomeActivity extends AppCompatActivity {
         });
         playFrame.addView(playBtn);
         content.addView(playFrame);
+        playBtn.post(() -> playBtn.requestFocus());
 
         // Episode 类型 → 先加载季列表，点击某季后加载该季剧集
         if (item.guid != null && !item.guid.isEmpty()) {
@@ -3109,6 +3148,9 @@ public class HomeActivity extends AppCompatActivity {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 title.setSelected(hasFocus);
+                card.setScaleX(hasFocus ? 1.05f : 1.0f);
+                card.setScaleY(hasFocus ? 1.05f : 1.0f);
+                card.setBackgroundResource(hasFocus ? R.drawable.bg_input : R.drawable.bg_media_card);
             }
         });
 
@@ -3218,7 +3260,6 @@ public class HomeActivity extends AppCompatActivity {
     // ==================== 按键 ====================
 
     @Override
-
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
             // 搜索框有焦点 → 隐藏键盘并清除搜索
@@ -3230,6 +3271,29 @@ public class HomeActivity extends AppCompatActivity {
             if (isSearching) {
                 clearSearch();
                 return true;
+            }
+            // 剧集选择页 → 返回详情页
+            if (showingEpisodes && savedDetailItem != null && savedDetailInfo != null) {
+                showingEpisodes = false;
+                buildDetailPage(savedDetailItem, savedDetailInfo);
+                return true;
+            }
+            // 详情页 → 返回上层（文件夹浏览列表、媒体库或概览）
+            if (showingDetail) {
+                showingDetail = false;
+                if (savedBrowseList != null && currentBrowseContainer != null) {
+                    renderBrowseAll(currentBrowseContainer, savedBrowseList, savedBrowseTitle);
+                    return true;
+                } else if (!folderNavStack.isEmpty()) {
+                    goBackFolder();
+                    return true;
+                } else if (currentTab == 1) {
+                    loadMediaLibraries();
+                    return true;
+                } else {
+                    loadOverview();
+                    return true;
+                }
             }
             // 子文件夹导航回退
             if (!folderNavStack.isEmpty()) {
@@ -3250,12 +3314,6 @@ public class HomeActivity extends AppCompatActivity {
                 loadOverview();
                 return true;
             }
-            // 剧集选择页 → 返回详情页
-            if (showingEpisodes && savedDetailItem != null && savedDetailInfo != null) {
-                showingEpisodes = false;
-                buildDetailPage(savedDetailItem, savedDetailInfo);
-                return true;
-            }
             if (!showingOverview) {
                 loadOverview();
                 return true;
@@ -3268,6 +3326,32 @@ public class HomeActivity extends AppCompatActivity {
             }
             return true;
         }
+
+        // 遥控器长按追踪：按下确认键时启动长按追踪，分发 onKeyLongPress
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+            event.startTracking();
+        }
+
+        // 遥控器菜单键(MENU) / 选项键：直接触发当前焦点项的长按操作（如文件夹长按“全部播放”）
+        if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_BUTTON_Y) {
+            View focus = getCurrentFocus();
+            if (focus != null && focus.isLongClickable()) {
+                return focus.performLongClick();
+            }
+        }
+
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyLongPress(int keyCode, KeyEvent event) {
+        // 遥控器长按确认键（OK/ENTER）触发对应卡片/文件夹的长按操作（全部播放等）
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+            View focus = getCurrentFocus();
+            if (focus != null && focus.isLongClickable()) {
+                return focus.performLongClick();
+            }
+        }
+        return super.onKeyLongPress(keyCode, event);
     }
 }
