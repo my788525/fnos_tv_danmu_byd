@@ -42,6 +42,8 @@ public class PlayerActivity extends AppCompatActivity {
     private Button btnPlayPause, btnRewind, btnForward, btnSpeed, btnRatio, btnInfo, btnCloseInfo, btnEpisodeList, btnNextEp, btnBack, btnDanmu, btnHdrToggle, btnQuality, btnPlayCenter;
     private ImageView btnLock;
     private TextView tvTitle, tvDanmuStatus, tvDanmuMatch, tvSpeedHint, infoTextAudio, infoTextExtra;
+    private View llTopVideoInfoBanner;
+    private TextView tvBannerMainTitle, tvBannerSubInfo;
     private Button btnCloudMode, btnBrightness, btnSkip;
     private boolean introSkipped = false, outroSkipped = false;
     private float speedBeforeLongPress = 1.0f;
@@ -192,6 +194,9 @@ public class PlayerActivity extends AppCompatActivity {
         btnCloudMode = findViewById(R.id.btnCloudMode);
         tvDanmuMatch = findViewById(R.id.tvDanmuMatch);
         tvSpeedHint = findViewById(R.id.tvSpeedHint);
+        llTopVideoInfoBanner = findViewById(R.id.llTopVideoInfoBanner);
+        tvBannerMainTitle = findViewById(R.id.tvBannerMainTitle);
+        tvBannerSubInfo = findViewById(R.id.tvBannerSubInfo);
         topBar = findViewById(R.id.topBar);
         controller = findViewById(R.id.controller);
         controller.setOnTouchListener((v, e) -> true);
@@ -241,6 +246,7 @@ public class PlayerActivity extends AppCompatActivity {
                 seeked = false;
                 seekTs = 0;
                 updateTitle();
+                showTopVideoBanner();
                 loadPlayInfo();
                 if (isFolderPlaylist && folderGuid != null && !folderGuid.isEmpty()) {
                     saveFolderProgress(folderGuid, guid, 0);
@@ -793,6 +799,9 @@ public class PlayerActivity extends AppCompatActivity {
                             && !info.item.mediaStream.resolutions.isEmpty())
                         resolution = info.item.mediaStream.resolutions.get(0);
 
+                    // 成功获取播放信息后弹出或刷新顶部基本信息卡片（15秒自动渐隐消失）
+                    showTopVideoBanner();
+
                     // 直播频道：直接从 live_channels 取第一个流地址播放
                     if (info.liveChannels != null && !info.liveChannels.isEmpty()) {
                         String liveUrl = info.liveChannels.get(0).path;
@@ -1285,6 +1294,92 @@ public class PlayerActivity extends AppCompatActivity {
         tvTitle.setText(sb.toString().trim());
     }
 
+    private final Runnable hideBannerRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (llTopVideoInfoBanner != null && llTopVideoInfoBanner.getVisibility() == View.VISIBLE) {
+                llTopVideoInfoBanner.animate()
+                        .alpha(0f)
+                        .setDuration(400)
+                        .withEndAction(() -> {
+                            if (llTopVideoInfoBanner != null) {
+                                llTopVideoInfoBanner.setVisibility(View.GONE);
+                                llTopVideoInfoBanner.setAlpha(1.0f);
+                            }
+                        })
+                        .start();
+            }
+        }
+    };
+
+    /**
+     * 每次切换视频或开始播放时，在顶部弹出当前视频基本信息卡片，15秒后自动渐隐消失
+     */
+    private void showTopVideoBanner() {
+        if (llTopVideoInfoBanner == null || tvBannerMainTitle == null || tvBannerSubInfo == null) return;
+
+        // 1. 主标题
+        String mainTitle = (itemTitle != null && !itemTitle.isEmpty()) ? itemTitle : (itemTV != null ? itemTV : "视频播放");
+        tvBannerMainTitle.setText(mainTitle);
+
+        // 2. 副标题信息：[第 X/Y 首] · 专辑/剧名 · 时长 · 分辨率
+        StringBuilder sub = new StringBuilder();
+
+        // 序号信息
+        if (episodeManager != null && episodeManager.getEpisodeCount() > 0) {
+            int curIdx = episodeManager.getCurrentEpIndex();
+            int total = episodeManager.getEpisodeCount();
+            if (curIdx >= 0) {
+                if (isFolderPlaylist || episodeManager.isCustomPlaylist()) {
+                    sub.append("第 ").append(curIdx + 1).append(" / ").append(total).append(" 首");
+                } else {
+                    int epNum = getIntent().getIntExtra("episode_number", curIdx + 1);
+                    sub.append("第 ").append(epNum).append(" / ").append(total).append(" 集");
+                }
+            }
+        }
+
+        // 剧集/目录名
+        if (itemTV != null && !itemTV.isEmpty() && !itemTV.equals(itemTitle)) {
+            if (sub.length() > 0) sub.append("  ·  ");
+            sub.append(itemTV);
+        } else if (isFolderPlaylist && episodeManager != null && episodeManager.getPlaylistTitle() != null && !episodeManager.getPlaylistTitle().isEmpty()) {
+            if (sub.length() > 0) sub.append("  ·  ");
+            sub.append(episodeManager.getPlaylistTitle());
+        }
+
+        // 时长
+        long durSec = itemDuration > 0 ? itemDuration : (player != null && player.getDuration() > 0 ? player.getDuration() / 1000 : 0);
+        if (durSec > 0) {
+            long m = durSec / 60;
+            long s = durSec % 60;
+            if (sub.length() > 0) sub.append("  ·  ");
+            if (m >= 60) {
+                long h = m / 60;
+                long rm = m % 60;
+                sub.append(String.format(java.util.Locale.getDefault(), "%02d:%02d:%02d", h, rm, s));
+            } else {
+                sub.append(String.format(java.util.Locale.getDefault(), "%02d:%02d", m, s));
+            }
+        }
+
+        // 分辨率或画质
+        if (resolution != null && !resolution.isEmpty()) {
+            if (sub.length() > 0) sub.append("  ·  ");
+            sub.append(resolution);
+        }
+
+        tvBannerSubInfo.setText(sub.toString().trim());
+
+        handler.removeCallbacks(hideBannerRunnable);
+        llTopVideoInfoBanner.animate().cancel();
+        llTopVideoInfoBanner.setAlpha(1.0f);
+        llTopVideoInfoBanner.setVisibility(View.VISIBLE);
+
+        // 15秒后自动隐藏
+        handler.postDelayed(hideBannerRunnable, 15000);
+    }
+
     private void showCtrl(boolean show) {
         if (isLocked) {
             btnLock.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
@@ -1506,6 +1601,13 @@ public class PlayerActivity extends AppCompatActivity {
         if (isFolderPlaylist && folderGuid != null && !folderGuid.isEmpty()) {
             saveFolderProgress(folderGuid, itemGuid, ts);
         }
+        long durSec = itemDuration > 0 ? itemDuration : (player.getDuration() > 0 ? player.getDuration() / 1000 : 0);
+        // 需求：10分钟以内的短视频（如MV、短片）不记入飞牛服务端最近播放列表，以防最近播放被短视频刷屏
+        if (durSec > 0 && durSec < 600) {
+            Log.d(TAG, "视频时长小于10分钟(" + durSec + "s)，跳过上报服务端播放历史(不计入最近播放)");
+            return;
+        }
+
         Map<String, Object> r = new HashMap<>();
         r.put("item_guid", itemGuid); r.put("media_guid", mediaGuid);
         r.put("video_guid", videoGuid != null ? videoGuid : "");

@@ -79,6 +79,21 @@ public class EpisodeManager {
         return playlistTitle;
     }
 
+    public int getCurrentEpIndex() {
+        return currentEpIndex;
+    }
+
+    public int getEpisodeCount() {
+        return episodeList != null ? episodeList.size() : 0;
+    }
+
+    public PlayListItem getCurrentEpisodeItem() {
+        if (episodeList != null && currentEpIndex >= 0 && currentEpIndex < episodeList.size()) {
+            return episodeList.get(currentEpIndex);
+        }
+        return null;
+    }
+
     /** 是否有下一集/下一首 */
     public boolean hasNext() {
         if (episodeList == null || episodeList.isEmpty()) return false;
@@ -190,24 +205,41 @@ public class EpisodeManager {
     /** 显示剧集/播放列表选择器 */
     public void showPicker() {
         if (episodeList == null || episodeList.isEmpty()) return;
+
+        // 每次点开播放列表前，精准根据当前正在播放的 GUID 同步当前项索引
+        String activeGuid = cb != null ? cb.getItemGuid() : null;
+        if (activeGuid != null) {
+            for (int i = 0; i < episodeList.size(); i++) {
+                PlayListItem ep = episodeList.get(i);
+                if (ep != null && activeGuid.equals(ep.guid)) {
+                    currentEpIndex = i;
+                    break;
+                }
+            }
+        }
+
         final String[] items = new String[episodeList.size()];
         for (int i = 0; i < episodeList.size(); i++) {
             PlayListItem ep = episodeList.get(i);
             String title = ep.getDisplayTitle() != null ? ep.getDisplayTitle() : (ep.title != null ? ep.title : "");
             String dur = ep.getFormattedDuration();
+            boolean isCurrent = (i == currentEpIndex);
             if (isCustomPlaylist) {
-                items[i] = (i + 1) + ". " + title + (dur.isEmpty() ? "" : "  (" + dur + ")");
+                items[i] = (isCurrent ? "▶ " : "") + (i + 1) + ". " + title
+                        + (isCurrent ? "  [正在播放]" : (dur.isEmpty() ? "" : "  (" + dur + ")"));
             } else {
-                items[i] = "EP" + (ep.episodeNumber > 0 ? ep.episodeNumber : (i + 1))
-                        + "  " + title + (dur.isEmpty() ? "" : "  (" + dur + ")");
+                items[i] = (isCurrent ? "▶ " : "") + "EP" + (ep.episodeNumber > 0 ? ep.episodeNumber : (i + 1))
+                        + "  " + title + (isCurrent ? "  [正在播放]" : (dur.isEmpty() ? "" : "  (" + dur + ")"));
             }
         }
         String dlgTitle = isCustomPlaylist
                 ? ((playlistTitle != null && !playlistTitle.isEmpty()) ? ("播放列表 · " + playlistTitle) : "播放列表")
                 : "选择剧集";
-        new android.app.AlertDialog.Builder(cb.getContext())
+
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(cb.getContext())
                 .setTitle(dlgTitle)
-                .setItems(items, (dialog, which) -> {
+                .setSingleChoiceItems(items, currentEpIndex, (d, which) -> {
+                    d.dismiss();
                     if (which >= 0 && which < episodeList.size()) {
                         PlayListItem s = episodeList.get(which);
                         currentEpIndex = which;
@@ -219,7 +251,20 @@ public class EpisodeManager {
                     }
                 })
                 .setNegativeButton("取消", null)
-                .show();
+                .create();
+        dialog.show();
+
+        // 核心优化：弹窗展示后精确定位滚动到当前播放位置，并使当前播放项获得焦点，避免默认停留在最前
+        final android.widget.ListView listView = dialog.getListView();
+        if (listView != null && currentEpIndex >= 0) {
+            final int targetPos = currentEpIndex;
+            listView.post(() -> {
+                int offset = (int) (80 * cb.getContext().getResources().getDisplayMetrics().density);
+                listView.setSelectionFromTop(targetPos, offset);
+                listView.setSelection(targetPos);
+                listView.requestFocus();
+            });
+        }
     }
 
     /** 更新按钮文字 */

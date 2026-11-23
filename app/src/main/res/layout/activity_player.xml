@@ -115,6 +115,50 @@
         android:layout_gravity="center"
         android:visibility="gone" />
 
+    <!-- 切换视频时顶部基本信息卡片（15秒自动渐隐） -->
+    <LinearLayout
+        android:id="@+id/llTopVideoInfoBanner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="20dp"
+        android:layout_marginLeft="32dp"
+        android:layout_marginRight="32dp"
+        android:background="@drawable/bg_top_video_banner"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:elevation="6dp"
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvBannerMainTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="520dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/tvBannerSubInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:maxWidth="520dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#B3FFFFFF"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:text="" />
+    </LinearLayout>
+
     <!-- 弹幕状态提示（覆盖在视频上） -->
     <TextView
         android:id="@+id/tvDanmuStatus"

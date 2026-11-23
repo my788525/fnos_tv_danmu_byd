@@ -819,6 +819,19 @@ public class HomeActivity extends AppCompatActivity {
                                    Response<ApiResponse<List<PlayListItem>>> response) {
                 if (!response.isSuccessful() || response.body() == null || response.body().code != 0
                         || response.body().data == null || response.body().data.isEmpty()) return;
+
+                // 过滤掉时长在10分钟（600秒）以内的短视频（如MV/短片），不展示在最近播放/继续观看中
+                List<PlayListItem> rawList = response.body().data;
+                List<PlayListItem> filteredList = new ArrayList<>();
+                for (PlayListItem item : rawList) {
+                    if (item == null) continue;
+                    if (item.duration > 0 && item.duration < 600) {
+                        continue;
+                    }
+                    filteredList.add(item);
+                }
+                if (filteredList.isEmpty()) return;
+
                 // 找到继续观看占位容器
                 for (int i = 0; i < moviesContainer.getChildCount(); i++) {
                     View v = moviesContainer.getChildAt(i);
@@ -839,7 +852,7 @@ public class HomeActivity extends AppCompatActivity {
                                 if (fva > 0) break;
                             }
                         }
-                        addContinueWatchingApi((LinearLayout) v, response.body().data, fva);
+                        addContinueWatchingApi((LinearLayout) v, filteredList, fva);
                         break;
                     }
                 }
