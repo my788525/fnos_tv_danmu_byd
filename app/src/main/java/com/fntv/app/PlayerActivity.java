@@ -123,6 +123,18 @@ public class PlayerActivity extends AppCompatActivity {
     private final Runnable hideBrightR = () -> { if (tvBrightOverlay != null) tvBrightOverlay.setVisibility(View.GONE); };
     private final Runnable hideVolR = () -> { if (tvVolOverlay != null) tvVolOverlay.setVisibility(View.GONE); };
 
+    private String folderGuid;
+    private boolean isFolderPlaylist = false;
+
+    private void saveFolderProgress(String fGuid, String iGuid, long ts) {
+        if (fGuid == null || fGuid.isEmpty() || iGuid == null || iGuid.isEmpty()) return;
+        getSharedPreferences("fntv_prefs", MODE_PRIVATE).edit()
+                .putString("folder_last_guid_" + fGuid, iGuid)
+                .putLong("folder_last_ts_" + fGuid, ts)
+                .putLong("folder_last_time_" + fGuid, System.currentTimeMillis())
+                .apply();
+    }
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -230,10 +242,14 @@ public class PlayerActivity extends AppCompatActivity {
                 seekTs = 0;
                 updateTitle();
                 loadPlayInfo();
+                if (isFolderPlaylist && folderGuid != null && !folderGuid.isEmpty()) {
+                    saveFolderProgress(folderGuid, guid, 0);
+                }
             }
         }, btnEpisodeList, btnNextEp);
 
-        boolean isFolderPlaylist = getIntent().getBooleanExtra("is_folder_playlist", false);
+        isFolderPlaylist = getIntent().getBooleanExtra("is_folder_playlist", false);
+        folderGuid = getIntent().getStringExtra("folder_guid");
         if (isFolderPlaylist) {
             java.util.List<com.fntv.app.api.model.PlayListItem> pl = PlaylistHolder.getPlaylist();
             if (pl != null && !pl.isEmpty()) {
@@ -1487,6 +1503,9 @@ public class PlayerActivity extends AppCompatActivity {
         if (player == null || player.getPlaybackState() != Player.STATE_READY) return;
         long p = player.getCurrentPosition(); if (p <= 0) return;
         long ts = p / 1000;
+        if (isFolderPlaylist && folderGuid != null && !folderGuid.isEmpty()) {
+            saveFolderProgress(folderGuid, itemGuid, ts);
+        }
         Map<String, Object> r = new HashMap<>();
         r.put("item_guid", itemGuid); r.put("media_guid", mediaGuid);
         r.put("video_guid", videoGuid != null ? videoGuid : "");
@@ -1990,9 +2009,21 @@ public class PlayerActivity extends AppCompatActivity {
             pausedByLifecycle = false;
         }
     }
-    @Override protected void onStop() { super.onStop(); saveProgress(); if (player != null) player.setPlayWhenReady(false); }
+    @Override protected void onStop() {
+        super.onStop();
+        if (isFolderPlaylist && folderGuid != null && !folderGuid.isEmpty() && player != null) {
+            long curPos = player.getCurrentPosition();
+            if (curPos > 0) saveFolderProgress(folderGuid, itemGuid, curPos / 1000);
+        }
+        saveProgress();
+        if (player != null) player.setPlayWhenReady(false);
+    }
     @Override protected void onDestroy() {
-        if (getIntent().getBooleanExtra("is_folder_playlist", false)) {
+        if (isFolderPlaylist && folderGuid != null && !folderGuid.isEmpty() && player != null) {
+            long curPos = player.getCurrentPosition();
+            if (curPos > 0) saveFolderProgress(folderGuid, itemGuid, curPos / 1000);
+        }
+        if (isFolderPlaylist) {
             PlaylistHolder.clear();
         }
         saveProgress();

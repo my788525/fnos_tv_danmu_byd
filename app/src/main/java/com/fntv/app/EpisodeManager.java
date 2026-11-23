@@ -81,12 +81,16 @@ public class EpisodeManager {
 
     /** 是否有下一集/下一首 */
     public boolean hasNext() {
-        return episodeList != null && currentEpIndex >= 0 && currentEpIndex < episodeList.size() - 1;
+        if (episodeList == null || episodeList.isEmpty()) return false;
+        if (isCustomPlaylist) return true; // 自定义文件夹播放列表支持列表循环连播
+        return currentEpIndex >= 0 && currentEpIndex < episodeList.size() - 1;
     }
 
     /** 是否有上一集/上一首 */
     public boolean hasPrev() {
-        return episodeList != null && currentEpIndex > 0 && currentEpIndex < episodeList.size();
+        if (episodeList == null || episodeList.isEmpty()) return false;
+        if (isCustomPlaylist) return true; // 自定义文件夹播放列表支持列表循环连播
+        return currentEpIndex > 0 && currentEpIndex < episodeList.size();
     }
 
     /** 是否正在加载 */
@@ -146,8 +150,16 @@ public class EpisodeManager {
     /** 播放下一个项目（下一集/下一首MV） */
     public void playNext() {
         if (!hasNext()) return;
-        PlayListItem next = episodeList.get(currentEpIndex + 1);
-        currentEpIndex++;
+        int nextIndex = currentEpIndex + 1;
+        if (nextIndex >= episodeList.size()) {
+            if (isCustomPlaylist) {
+                nextIndex = 0; // 文件夹循环连播
+            } else {
+                return;
+            }
+        }
+        currentEpIndex = nextIndex;
+        PlayListItem next = episodeList.get(currentEpIndex);
         currentGuid = next.guid;
         currentTitle = next.getDisplayTitle() != null ? next.getDisplayTitle() : next.title;
         updateBtnText();
@@ -158,8 +170,16 @@ public class EpisodeManager {
     /** 播放上一个项目（方向盘/遥控上键） */
     public void playPrev() {
         if (!hasPrev()) return;
-        PlayListItem prev = episodeList.get(currentEpIndex - 1);
-        currentEpIndex--;
+        int prevIndex = currentEpIndex - 1;
+        if (prevIndex < 0) {
+            if (isCustomPlaylist) {
+                prevIndex = episodeList.size() - 1; // 文件夹循环连播
+            } else {
+                return;
+            }
+        }
+        currentEpIndex = prevIndex;
+        PlayListItem prev = episodeList.get(currentEpIndex);
         currentGuid = prev.guid;
         currentTitle = prev.getDisplayTitle() != null ? prev.getDisplayTitle() : prev.title;
         updateBtnText();

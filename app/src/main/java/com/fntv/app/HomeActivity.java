@@ -64,6 +64,11 @@ public class HomeActivity extends AppCompatActivity {
     public static final String PREF_FOLDERS_FIRST = "pref_folders_first"; // 默认 true
     public static final String PREF_FOLDER_HIERARCHY = "pref_folder_hierarchy"; // 真实文件夹路径层级浏览，默认 true
 
+    // 播放列表播放模式
+    public static final int PLAY_MODE_SEQUENTIAL = 0; // 顺序播放 (从头开始)
+    public static final int PLAY_MODE_RESUME = 1;     // 继续播放 (上次播放列表与进度)
+    public static final int PLAY_MODE_SHUFFLE = 2;    // 随机播放 (随机打乱顺序)
+
     private RelativeLayout rlViewModeSetting, rlSortFieldSetting, rlSortOrderSetting, rlFoldersFirstSetting, rlFolderHierarchySetting;
     private TextView tvViewModeValue, tvSortFieldValue, tvSortOrderValue, tvFoldersFirstValue, tvFolderHierarchyValue;
 
@@ -1771,20 +1776,26 @@ public class HomeActivity extends AppCompatActivity {
         startActivity(intent);
     }
 
-    /** 文件夹长按弹窗选择：全部播放 或 打开文件夹 */
+    /** 文件夹长按弹窗选择：顺序播放、继续播放、随机播放 或 打开文件夹 */
     private void showFolderActionDialog(final PlayListItem folderItem) {
         if (folderItem == null) return;
         final String title = folderItem.getDisplayTitle();
         final String[] options = new String[] {
-                "▶ 全部播放 (连续播放此文件夹)",
+                "▶ 顺序播放 (从第一首开始)",
+                "⏯ 继续播放 (上次播放列表与进度)",
+                "🔀 随机播放 (打乱顺序)",
                 "📂 打开文件夹"
         };
         new AlertDialog.Builder(this)
                 .setTitle("📁 " + title)
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) {
-                        playAllInFolder(folderItem.guid, title);
+                        playAllInFolder(folderItem.guid, title, PLAY_MODE_SEQUENTIAL);
                     } else if (which == 1) {
+                        playAllInFolder(folderItem.guid, title, PLAY_MODE_RESUME);
+                    } else if (which == 2) {
+                        playAllInFolder(folderItem.guid, title, PLAY_MODE_SHUFFLE);
+                    } else if (which == 3) {
                         onItemClick(folderItem);
                     }
                 })
@@ -1792,20 +1803,26 @@ public class HomeActivity extends AppCompatActivity {
                 .show();
     }
 
-    /** 媒体库长按弹窗选择：全部播放 或 打开媒体库 */
+    /** 媒体库长按弹窗选择：顺序播放、继续播放、随机播放 或 打开媒体库 */
     private void showLibActionDialog(final MediaDbItem lib) {
         if (lib == null) return;
         final String title = lib.title != null ? lib.title : "媒体库";
         final String[] options = new String[] {
-                "▶ 全部播放 (连续播放此目录)",
+                "▶ 顺序播放 (从第一项开始)",
+                "⏯ 继续播放 (上次播放列表与进度)",
+                "🔀 随机播放 (打乱顺序)",
                 "📂 打开目录"
         };
         new AlertDialog.Builder(this)
                 .setTitle("📁 " + title)
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) {
-                        playAllInFolder(lib.guid, title);
+                        playAllInFolder(lib.guid, title, PLAY_MODE_SEQUENTIAL);
                     } else if (which == 1) {
+                        playAllInFolder(lib.guid, title, PLAY_MODE_RESUME);
+                    } else if (which == 2) {
+                        playAllInFolder(lib.guid, title, PLAY_MODE_SHUFFLE);
+                    } else if (which == 3) {
                         browseItems(lib.guid, lib.title);
                     }
                 })
@@ -1813,21 +1830,25 @@ public class HomeActivity extends AppCompatActivity {
                 .show();
     }
 
-    /** 视频文件长按选择：连续播放 或 播放单个 */
+    /** 视频文件长按选择：连续播放、随机播放 或 播放单个 */
     private void showFileActionDialog(final PlayListItem fileItem) {
         if (fileItem == null) return;
         final String title = fileItem.getDisplayTitle();
         boolean hasBrowseList = savedBrowseList != null && !savedBrowseList.isEmpty();
         final String[] options = hasBrowseList
-                ? new String[] { "▶ 从此处开始连续播放", "▶ 仅播放此项", "ℹ️ 查看详情" }
+                ? new String[] { "▶ 从此处开始连续播放", "🔀 随机播放当前文件夹", "▶ 仅播放此项", "ℹ️ 查看详情" }
                 : new String[] { "▶ 播放此项", "ℹ️ 查看详情" };
         new AlertDialog.Builder(this)
                 .setTitle("🎞️ " + title)
                 .setItems(options, (dialog, which) -> {
                     if (hasBrowseList) {
                         if (which == 0) {
-                            startPlaylistPlayback(savedBrowseTitle != null ? savedBrowseTitle : "文件夹播放", savedBrowseList, fileItem.guid);
+                            startPlaylistPlayback(savedBrowseTitle != null ? savedBrowseTitle : "文件夹播放",
+                                    savedBrowseList, currentBrowseGuid, PLAY_MODE_SEQUENTIAL, fileItem.guid);
                         } else if (which == 1) {
+                            startPlaylistPlayback(savedBrowseTitle != null ? savedBrowseTitle : "文件夹播放",
+                                    savedBrowseList, currentBrowseGuid, PLAY_MODE_SHUFFLE, null);
+                        } else if (which == 2) {
                             launchPlayer(fileItem.guid, fileItem.title, fileItem.tvTitle != null ? fileItem.tvTitle : "",
                                     fileItem.episodeNumber, fileItem.poster, fileItem.getCategoryLabel(),
                                     fileItem.ts, fileItem.duration, fileItem.parentGuid);
@@ -1849,7 +1870,7 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     /** 加载并以播放列表方式连续播放指定文件夹 */
-    private void playAllInFolder(String folderGuid, final String folderTitle) {
+    private void playAllInFolder(final String folderGuid, final String folderTitle, final int playMode) {
         if (folderGuid == null || folderGuid.isEmpty()) return;
         Toast.makeText(this, "正在获取「" + folderTitle + "」文件列表...", Toast.LENGTH_SHORT).show();
 
@@ -1858,7 +1879,7 @@ public class HomeActivity extends AppCompatActivity {
         final boolean useParent = folderGuid.startsWith("fv_");
         ItemListRequest request = useParent
                 ? ItemListRequest.browseFolderByParent(folderGuid)
-                : new ItemListRequest(folderGuid, BROWSE_TYPES, true, sortColumn, sortType, 500);
+                : new ItemListRequest(folderGuid, BROWSE_TYPES, false, sortColumn, sortType, 500);
         request.pageSize = 500;
 
         apiManager.getApi().getItemList(request).enqueue(new Callback<ApiResponse<ItemListResponse>>() {
@@ -1871,7 +1892,7 @@ public class HomeActivity extends AppCompatActivity {
                     return;
                 }
                 List<PlayListItem> list = response.body().data.list;
-                startPlaylistPlayback(folderTitle, list, null);
+                startPlaylistPlayback(folderTitle, list, folderGuid, playMode, null);
             }
 
             @Override
@@ -1881,17 +1902,31 @@ public class HomeActivity extends AppCompatActivity {
         });
     }
 
-    /** 播放当前已浏览文件夹中的所有文件 */
+    /** 播放当前已浏览文件夹中的所有文件（弹窗选择顺序播放、继续播放或随机播放） */
     private void playAllCurrentFolder() {
         if (savedBrowseList == null || savedBrowseList.isEmpty()) {
             Toast.makeText(this, "当前文件夹为空", Toast.LENGTH_SHORT).show();
             return;
         }
-        startPlaylistPlayback(savedBrowseTitle != null ? savedBrowseTitle : "当前目录", savedBrowseList, null);
+        final String title = savedBrowseTitle != null ? savedBrowseTitle : "当前目录";
+        final String[] options = new String[] {
+                "▶ 顺序播放 (从第一首开始)",
+                "⏯ 继续播放 (上次播放列表与进度)",
+                "🔀 随机播放 (打乱顺序)"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("▶ 全部播放 · " + title)
+                .setItems(options, (dialog, which) -> {
+                    int mode = (which == 1) ? PLAY_MODE_RESUME : (which == 2 ? PLAY_MODE_SHUFFLE : PLAY_MODE_SEQUENTIAL);
+                    startPlaylistPlayback(title, savedBrowseList, currentBrowseGuid, mode, null);
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
-    /** 过滤出可播放项并按当前排序规则排序后，连续播放 */
-    private void startPlaylistPlayback(String playlistTitle, List<PlayListItem> rawList, String startGuid) {
+    /** 过滤出可播放项并按播放模式（顺序、继续、随机）连续播放 */
+    private void startPlaylistPlayback(String playlistTitle, List<PlayListItem> rawList,
+                                       String folderGuid, int playMode, String startGuid) {
         if (rawList == null || rawList.isEmpty()) {
             Toast.makeText(this, "该文件夹下没有可播放的视频", Toast.LENGTH_SHORT).show();
             return;
@@ -1906,25 +1941,77 @@ public class HomeActivity extends AppCompatActivity {
             Toast.makeText(this, "该文件夹下没有可直接播放的视频（若有子文件夹请进入子文件夹播放）", Toast.LENGTH_LONG).show();
             return;
         }
-        // 按用户设置的排序规则排序
+
+        // 默认按设置排序
         MediaSortHelper.sortItems(playableList, getSortField(), getSortOrder(), false);
 
         int startIndex = 0;
-        if (startGuid != null) {
-            for (int i = 0; i < playableList.size(); i++) {
-                if (startGuid.equals(playableList.get(i).guid)) {
-                    startIndex = i;
-                    break;
+        long targetTs = 0;
+
+        if (playMode == PLAY_MODE_SHUFFLE) {
+            java.util.Collections.shuffle(playableList, new java.util.Random());
+            startIndex = 0;
+            targetTs = 0;
+            Toast.makeText(this, "🔀 随机打乱共 " + playableList.size() + " 首，开始播放", Toast.LENGTH_SHORT).show();
+        } else if (playMode == PLAY_MODE_RESUME) {
+            // 查找上次播放记录
+            String lastGuid = null;
+            long lastTs = 0;
+            if (folderGuid != null && !folderGuid.isEmpty()) {
+                lastGuid = prefs.getString("folder_last_guid_" + folderGuid, null);
+                lastTs = prefs.getLong("folder_last_ts_" + folderGuid, 0L);
+            }
+            boolean found = false;
+            if (lastGuid != null) {
+                for (int i = 0; i < playableList.size(); i++) {
+                    if (lastGuid.equals(playableList.get(i).guid)) {
+                        startIndex = i;
+                        targetTs = lastTs;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                // 服务端进度兜底：寻找进度大于0的项
+                for (int i = 0; i < playableList.size(); i++) {
+                    PlayListItem item = playableList.get(i);
+                    if (item.ts > 0) {
+                        startIndex = i;
+                        targetTs = item.ts;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (found) {
+                PlayListItem resumeItem = playableList.get(startIndex);
+                Toast.makeText(this, "⏯ 从第 " + (startIndex + 1) + "/" + playableList.size() + " 首「"
+                        + resumeItem.getDisplayTitle() + "」继续播放", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "未找到上次播放记录，从第一项开始播放", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            // PLAY_MODE_SEQUENTIAL
+            if (startGuid != null) {
+                for (int i = 0; i < playableList.size(); i++) {
+                    if (startGuid.equals(playableList.get(i).guid)) {
+                        startIndex = i;
+                        break;
+                    }
                 }
             }
         }
 
-        PlaylistHolder.setPlaylist(playlistTitle, playableList);
+        String finalTitle = (playMode == PLAY_MODE_SHUFFLE) ? (playlistTitle + " (随机)") : playlistTitle;
+        PlaylistHolder.setPlaylist(finalTitle, playableList);
+
         PlayListItem first = playableList.get(startIndex);
-        long ts = first.ts;
+        long ts = (targetTs > 0) ? targetTs : first.ts;
         if (first.duration > 0 && first.duration < 600) {
             ts = 0;
         }
+
         Intent intent = new Intent(this, PlayerActivity.class);
         intent.putExtra("guid", first.guid);
         intent.putExtra("title", first.getDisplayTitle());
@@ -1936,7 +2023,8 @@ public class HomeActivity extends AppCompatActivity {
         intent.putExtra("duration", first.duration);
         intent.putExtra("parent_guid", first.parentGuid);
         intent.putExtra("is_folder_playlist", true);
-        intent.putExtra("playlist_title", playlistTitle);
+        intent.putExtra("folder_guid", folderGuid);
+        intent.putExtra("playlist_title", finalTitle);
         startActivity(intent);
     }
 
