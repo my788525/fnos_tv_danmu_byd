@@ -4,10 +4,14 @@ import android.content.Context;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.Toast;
 
 import com.fntv.app.api.FnApiManager;
 import com.fntv.app.api.model.ApiResponse;
+import com.fntv.app.api.model.ItemListRequest;
+import com.fntv.app.api.model.ItemListResponse;
 import com.fntv.app.api.model.PlayListItem;
+import com.fntv.app.util.MediaSortHelper;
 
 import java.util.List;
 
@@ -25,6 +29,9 @@ public class EpisodeManager {
         FnApiManager getApiManager();
         Context getContext();
         void onSwitchEpisode(String guid, String title);
+        String getParentTitle();
+        boolean isForceSingle();
+        void onCustomPlaylistLoaded(String folderGuid);
     }
 
     private List<PlayListItem> episodeList;
@@ -63,6 +70,10 @@ public class EpisodeManager {
             if (currentEpIndex < 0 && !episodeList.isEmpty()) {
                 currentEpIndex = 0;
             }
+        }
+        PlaylistHolder.setPlaylist(title, this.episodeList);
+        if (cb != null) {
+            cb.onCustomPlaylistLoaded(cb.getParentGuid());
         }
         if (btnEpisodeList != null) {
             btnEpisodeList.setVisibility(View.VISIBLE);
@@ -151,6 +162,9 @@ public class EpisodeManager {
                             if (btnEpisodeList != null) btnEpisodeList.setVisibility(View.VISIBLE);
                             updateBtnText();
                             updateNextBtn();
+                        } else {
+                            // 不是电视剧集，或者剧集列表为空：尝试加载同文件夹下的同级视频
+                            loadFolderSiblings(parentGuid);
                         }
                     }
 
@@ -158,8 +172,103 @@ public class EpisodeManager {
                     public void onFailure(Call<ApiResponse<List<PlayListItem>>> call, Throwable t) {
                         loadingEpisodes = false;
                         Log.e(TAG, "getEpisodeList 失败: " + t.getMessage());
+                        loadFolderSiblings(parentGuid);
                     }
                 });
+    }
+
+    /** 尝试加载同一文件夹下的兄弟视频，若存在其他视频则自动加入播放队列 */
+    private void loadFolderSiblings(final String parentGuid) {
+        if (parentGuid == null || parentGuid.isEmpty()) return;
+        if (cb != null && cb.isForceSingle()) return;
+        loadingEpisodes = true;
+        Log.d(TAG, "尝试按文件夹加载同级视频: parentGuid=" + parentGuid);
+        final boolean useParent = parentGuid.startsWith("fv_");
+        ItemListRequest req = useParent
+                ? ItemListRequest.browseFolderByParent(parentGuid)
+                : new ItemListRequest(parentGuid, java.util.Arrays.asList("Movie", "TV", "Directory", "Video", "Episode"), false, "sort_title", "ASC", 500);
+        req.pageSize = 500;
+
+        cb.getApiManager().getApi().getItemList(req).enqueue(new retrofit2.Callback<ApiResponse<ItemListResponse>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<ItemListResponse>> call, Response<ApiResponse<ItemListResponse>> resp) {
+                loadingEpisodes = false;
+                List<PlayListItem> items = null;
+                if (resp.isSuccessful() && resp.body() != null && resp.body().code == 0
+                        && resp.body().data != null && resp.body().data.list != null) {
+                    items = resp.body().data.list;
+                }
+
+                List<PlayListItem> playableList = new java.util.ArrayList<>();
+                if (items != null) {
+                    for (PlayListItem it : items) {
+                        if (it != null && !it.isFolder() && !"TV".equals(it.type)) {
+                            playableList.add(it);
+                        }
+                    }
+                }
+
+                if (playableList.size() > 1) {
+                    Log.d(TAG, "同文件夹下发现 " + playableList.size() + " 个视频，自动加入播放队列");
+                    MediaSortHelper.sortItems(playableList, MediaSortHelper.SORT_NAME, MediaSortHelper.ORDER_ASC, false);
+                    String title = cb.getParentTitle();
+                    if (title == null || title.isEmpty()) title = "文件夹播放";
+                    setCustomPlaylist(playableList, title, cb.getItemGuid());
+                    if (cb.getContext() != null) {
+                        Toast.makeText(cb.getContext(), "📁 已将同文件夹内 " + playableList.size() + " 个视频加入播放列表", Toast.LENGTH_SHORT).show();
+                    }
+                } else if (items == null || items.isEmpty()) {
+                    // 若首次查询为空，尝试另一种形态请求（useParent 互换）兜底
+                    retryFolderSiblingsWithAlt(parentGuid, !useParent);
+                }
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse<ItemListResponse>> call, Throwable t) {
+                loadingEpisodes = false;
+                retryFolderSiblingsWithAlt(parentGuid, !useParent);
+            }
+        });
+    }
+
+    private void retryFolderSiblingsWithAlt(final String parentGuid, boolean useParent) {
+        if (cb != null && cb.isForceSingle()) return;
+        ItemListRequest req = useParent
+                ? ItemListRequest.browseFolderByParent(parentGuid)
+                : new ItemListRequest(parentGuid, java.util.Arrays.asList("Movie", "TV", "Directory", "Video", "Episode"), false, "sort_title", "ASC", 500);
+        req.pageSize = 500;
+        loadingEpisodes = true;
+        cb.getApiManager().getApi().getItemList(req).enqueue(new retrofit2.Callback<ApiResponse<ItemListResponse>>() {
+            @Override
+            public void onResponse(Call<ApiResponse<ItemListResponse>> call, Response<ApiResponse<ItemListResponse>> resp) {
+                loadingEpisodes = false;
+                if (resp.isSuccessful() && resp.body() != null && resp.body().code == 0
+                        && resp.body().data != null && resp.body().data.list != null) {
+                    List<PlayListItem> items = resp.body().data.list;
+                    List<PlayListItem> playableList = new java.util.ArrayList<>();
+                    for (PlayListItem it : items) {
+                        if (it != null && !it.isFolder() && !"TV".equals(it.type)) {
+                            playableList.add(it);
+                        }
+                    }
+                    if (playableList.size() > 1) {
+                        Log.d(TAG, "备选查询同文件夹下发现 " + playableList.size() + " 个视频，自动加入播放队列");
+                        MediaSortHelper.sortItems(playableList, MediaSortHelper.SORT_NAME, MediaSortHelper.ORDER_ASC, false);
+                        String title = cb.getParentTitle();
+                        if (title == null || title.isEmpty()) title = "文件夹播放";
+                        setCustomPlaylist(playableList, title, cb.getItemGuid());
+                        if (cb.getContext() != null) {
+                            Toast.makeText(cb.getContext(), "📁 已将同文件夹内 " + playableList.size() + " 个视频加入播放列表", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse<ItemListResponse>> call, Throwable t) {
+                loadingEpisodes = false;
+            }
+        });
     }
 
     /** 播放下一个项目（下一集/下一首MV） */

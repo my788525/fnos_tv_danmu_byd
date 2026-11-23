@@ -49,8 +49,11 @@ public class UpdateManager {
     }
 
     private void resetBtn() {
-        btnCheckUpdate.setEnabled(true);
-        btnCheckUpdate.setText("检查更新");
+        if (btnCheckUpdate != null) {
+            btnCheckUpdate.setEnabled(true);
+            btnCheckUpdate.setBackgroundResource(R.drawable.bg_btn_primary);
+            btnCheckUpdate.setText("检查更新");
+        }
     }
 
     // ========== 检查更新 ==========
@@ -170,8 +173,14 @@ public class UpdateManager {
     // ========== 下载 ==========
 
     private void downloadAndInstall(final String apkUrl, final int remoteVersion, final boolean isTestInstall) {
-        btnCheckUpdate.setText(isTestInstall ? "测试中..." : "下载中...");
-        btnCheckUpdate.setEnabled(false);
+        if (btnCheckUpdate != null) {
+            btnCheckUpdate.setBackgroundResource(R.drawable.bg_btn_update_progress);
+            if (btnCheckUpdate.getBackground() != null) {
+                btnCheckUpdate.getBackground().setLevel(0);
+            }
+            btnCheckUpdate.setText(isTestInstall ? "测试下载 0%" : "下载中 0%");
+            btnCheckUpdate.setEnabled(false);
+        }
         new Thread(() -> {
             try {
                 HttpURLConnection c = (HttpURLConnection) new URL(apkUrl).openConnection();
@@ -188,6 +197,7 @@ public class UpdateManager {
                     return;
                 }
 
+                final long totalBytes = c.getContentLength();
                 File dir = new File(activity.getExternalFilesDir(null), "download");
                 if (!dir.exists()) dir.mkdirs();
                 final File apkFile = new File(dir, "FNTV_v" + remoteVersion + ".apk");
@@ -196,9 +206,57 @@ public class UpdateManager {
                 FileOutputStream fos = new FileOutputStream(apkFile);
                 byte[] buf = new byte[8192];
                 int n;
-                while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+                long downloaded = 0;
+                int lastPct = -1;
+                long lastTime = 0;
+                while ((n = is.read(buf)) != -1) {
+                    fos.write(buf, 0, n);
+                    downloaded += n;
+                    long now = System.currentTimeMillis();
+                    if (totalBytes > 0) {
+                        int pct = (int) (downloaded * 100 / totalBytes);
+                        if (pct > 100) pct = 100;
+                        if (pct != lastPct && (now - lastTime >= 80 || pct == 100)) {
+                            lastPct = pct;
+                            lastTime = now;
+                            final int fPct = pct;
+                            final long fDl = downloaded;
+                            final long fTot = totalBytes;
+                            activity.runOnUiThread(() -> {
+                                if (btnCheckUpdate != null) {
+                                    if (btnCheckUpdate.getBackground() != null) {
+                                        btnCheckUpdate.getBackground().setLevel(fPct * 100);
+                                    }
+                                    String mbStr = String.format(java.util.Locale.CHINA, "%.1f/%.1f MB",
+                                            fDl / 1048576.0, fTot / 1048576.0);
+                                    btnCheckUpdate.setText((isTestInstall ? "测试下载 " : "下载中 ") + fPct + "% (" + mbStr + ")");
+                                }
+                            });
+                        }
+                    } else {
+                        if (now - lastTime >= 250) {
+                            lastTime = now;
+                            final long fDl = downloaded;
+                            activity.runOnUiThread(() -> {
+                                if (btnCheckUpdate != null) {
+                                    String mbStr = String.format(java.util.Locale.CHINA, "%.1f MB", fDl / 1048576.0);
+                                    btnCheckUpdate.setText((isTestInstall ? "测试下载 " : "下载中 ") + mbStr);
+                                }
+                            });
+                        }
+                    }
+                }
                 fos.close();
                 is.close();
+
+                activity.runOnUiThread(() -> {
+                    if (btnCheckUpdate != null) {
+                        if (btnCheckUpdate.getBackground() != null) {
+                            btnCheckUpdate.getBackground().setLevel(10000);
+                        }
+                        btnCheckUpdate.setText("下载完成，校验中...");
+                    }
+                });
 
                 Log.d(TAG, "下载完成: " + apkFile.getAbsolutePath() + " (" + apkFile.length() + " bytes)");
 

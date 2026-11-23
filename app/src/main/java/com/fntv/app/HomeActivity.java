@@ -1767,15 +1767,40 @@ public class HomeActivity extends AppCompatActivity {
     /** 启动播放器 */
     private void launchPlayer(String guid, String title, String tvTitle, int epNum,
                               String poster, String cat, long ts, long dur) {
-        launchPlayer(guid, title, tvTitle, epNum, poster, cat, ts, dur, null);
+        launchPlayer(guid, title, tvTitle, epNum, poster, cat, ts, dur, null, false);
     }
 
     private void launchPlayer(String guid, String title, String tvTitle, int epNum,
                               String poster, String cat, long ts, long dur, String parentGuid) {
+        launchPlayer(guid, title, tvTitle, epNum, poster, cat, ts, dur, parentGuid, false);
+    }
+
+    private void launchPlayer(String guid, String title, String tvTitle, int epNum,
+                              String poster, String cat, long ts, long dur, String parentGuid, boolean forceSingle) {
         // 自动续播对10分钟(<600s)以下视频不生效，避免MV类视频从末尾几秒开始播
         if (dur > 0 && dur < 600) {
             ts = 0;
         }
+
+        // 自动加入同文件夹播放队列：如果未强制单项播放，且当前浏览列表中存在该视频及同文件夹兄弟视频
+        if (!forceSingle && savedBrowseList != null && !savedBrowseList.isEmpty()) {
+            boolean currentFound = false;
+            List<PlayListItem> playableSiblings = new ArrayList<>();
+            for (PlayListItem pli : savedBrowseList) {
+                if (pli != null && !pli.isFolder() && !"TV".equals(pli.type)) {
+                    playableSiblings.add(pli);
+                    if (guid != null && guid.equals(pli.guid)) {
+                        currentFound = true;
+                    }
+                }
+            }
+            if (currentFound && playableSiblings.size() > 1) {
+                String plTitle = (savedBrowseTitle != null && !savedBrowseTitle.isEmpty()) ? savedBrowseTitle : "文件夹播放";
+                startPlaylistPlayback(plTitle, savedBrowseList, currentBrowseGuid, PLAY_MODE_SEQUENTIAL, guid, ts);
+                return;
+            }
+        }
+
         Intent intent = new Intent(this, PlayerActivity.class);
         intent.putExtra("guid", guid);
         intent.putExtra("title", title);
@@ -1786,6 +1811,7 @@ public class HomeActivity extends AppCompatActivity {
         intent.putExtra("ts", ts);
         intent.putExtra("duration", dur);
         if (parentGuid != null) intent.putExtra("parent_guid", parentGuid);
+        if (forceSingle) intent.putExtra("force_single", true);
         startActivity(intent);
     }
 
@@ -1864,7 +1890,7 @@ public class HomeActivity extends AppCompatActivity {
                         } else if (which == 2) {
                             launchPlayer(fileItem.guid, fileItem.title, fileItem.tvTitle != null ? fileItem.tvTitle : "",
                                     fileItem.episodeNumber, fileItem.poster, fileItem.getCategoryLabel(),
-                                    fileItem.ts, fileItem.duration, fileItem.parentGuid);
+                                    fileItem.ts, fileItem.duration, fileItem.parentGuid, true);
                         } else {
                             showDetail(fileItem);
                         }
@@ -1940,6 +1966,11 @@ public class HomeActivity extends AppCompatActivity {
     /** 过滤出可播放项并按播放模式（顺序、继续、随机）连续播放 */
     private void startPlaylistPlayback(String playlistTitle, List<PlayListItem> rawList,
                                        String folderGuid, int playMode, String startGuid) {
+        startPlaylistPlayback(playlistTitle, rawList, folderGuid, playMode, startGuid, -1);
+    }
+
+    private void startPlaylistPlayback(String playlistTitle, List<PlayListItem> rawList,
+                                       String folderGuid, int playMode, String startGuid, long initialTs) {
         if (rawList == null || rawList.isEmpty()) {
             Toast.makeText(this, "该文件夹下没有可播放的视频", Toast.LENGTH_SHORT).show();
             return;
@@ -2013,6 +2044,9 @@ public class HomeActivity extends AppCompatActivity {
                         break;
                     }
                 }
+            }
+            if (initialTs >= 0) {
+                targetTs = initialTs;
             }
         }
 

@@ -58,7 +58,7 @@ public class PlayerActivity extends AppCompatActivity {
     // 解码失败自动降级画质：记录起始档位与已尝试次数，避免无限循环
     private int baseQualityIndex = 1;
     private int qualityRetry = 0;
-    private String itemGuid, baseUrl, itemTitle, itemTV, itemPoster, itemCategory, parentGuid;
+    private String itemGuid, baseUrl, itemTitle, itemTV, itemPoster, itemCategory, parentGuid, parentTitle;
     private long itemDuration;
     private FnApiManager apiManager;
     private String mediaGuid, videoGuid, audioGuid, subtitleGuid, resolution;
@@ -236,6 +236,21 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public int getEpisodeNumber() { return getIntent().getIntExtra("episode_number", 0); }
             @Override public FnApiManager getApiManager() { return apiManager; }
             @Override public Context getContext() { return PlayerActivity.this; }
+            @Override public String getParentTitle() {
+                if (parentTitle != null && !parentTitle.isEmpty()) return parentTitle;
+                String pt = getIntent().getStringExtra("playlist_title");
+                if (pt != null && !pt.isEmpty()) return pt;
+                return "文件夹播放";
+            }
+            @Override public boolean isForceSingle() {
+                return getIntent().getBooleanExtra("force_single", false);
+            }
+            @Override public void onCustomPlaylistLoaded(String fGuid) {
+                isFolderPlaylist = true;
+                if (fGuid != null && !fGuid.isEmpty()) {
+                    folderGuid = fGuid;
+                }
+            }
             @Override public void onSwitchEpisode(String guid, String title) {
                 introSkipped = false;
                 outroSkipped = false;
@@ -784,6 +799,9 @@ public class PlayerActivity extends AppCompatActivity {
                     subtitleGuid = info.subtitleGuid != null ? info.subtitleGuid : "_no_display_";
                     if (info.item != null && info.item.tvTitle != null) itemTV = info.item.tvTitle;
                     if (info.item != null) itemTitle = info.item.title;
+                    if (info.item != null && info.item.parentTitle != null && !info.item.parentTitle.isEmpty()) {
+                        parentTitle = info.item.parentTitle;
+                    }
                     if (info.item != null && info.item.seasonNumber > 0) seasonNumber = info.item.seasonNumber;
                     if (info.item != null && info.item.duration > 0) itemDuration = info.item.duration;
                     if (itemDuration > 0 && itemDuration < 600) seekTs = 0;
