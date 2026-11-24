@@ -392,6 +392,33 @@
                     android:minWidth="0dp" android:minHeight="0dp"
                     android:visibility="gone" />
 
+                <Button android:id="@+id/btnPlayMode"
+                    android:layout_width="wrap_content" android:layout_height="34dp"
+                    android:background="@drawable/bg_chip"
+                    android:text="🔁 列表" android:textColor="#FFF"
+                    android:textSize="12sp" android:focusable="true"
+                    android:layout_marginRight="3dp" android:gravity="center"
+                    android:paddingLeft="10dp" android:paddingRight="10dp"
+                    android:minWidth="0dp" android:minHeight="0dp" />
+
+                <Button android:id="@+id/btnScreenOff"
+                    android:layout_width="wrap_content" android:layout_height="34dp"
+                    android:background="@drawable/bg_chip"
+                    android:text="🌙 息屏" android:textColor="#EEE"
+                    android:textSize="12sp" android:focusable="true"
+                    android:layout_marginRight="3dp" android:gravity="center"
+                    android:paddingLeft="10dp" android:paddingRight="10dp"
+                    android:minWidth="0dp" android:minHeight="0dp" />
+
+                <Button android:id="@+id/btnQuickMenu"
+                    android:layout_width="wrap_content" android:layout_height="34dp"
+                    android:background="@drawable/bg_chip"
+                    android:text="≡ 菜单" android:textColor="#EEE"
+                    android:textSize="12sp" android:focusable="true"
+                    android:layout_marginRight="3dp" android:gravity="center"
+                    android:paddingLeft="10dp" android:paddingRight="10dp"
+                    android:minWidth="0dp" android:minHeight="0dp" />
+
                 <Button android:id="@+id/btnSkip"
                     android:layout_width="wrap_content" android:layout_height="34dp"
                     android:background="@drawable/bg_chip" android:text="片头尾"
@@ -570,5 +597,26 @@
             android:layout_marginTop="8dp"
             android:nextFocusUp="@+id/btnSubtitleTrack" />
     </LinearLayout>
+
+    <!-- 息屏听歌纯黑全屏遮罩层（轻触屏幕或按遥控器任意键唤醒恢复亮屏） -->
+    <FrameLayout
+        android:id="@+id/vScreenOffOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvScreenOffHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="🌙 息屏听歌中\n\n轻触屏幕或按遥控器任意键唤醒"
+            android:gravity="center"
+            android:textColor="#55FFFFFF"
+            android:textSize="16sp" />
+    </FrameLayout>
 
 </FrameLayout>

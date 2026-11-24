@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -39,7 +40,12 @@ public class PlayerActivity extends AppCompatActivity {
     private SimpleExoPlayer player;
     private TextView tvBuffering, tvTime, infoText;
     private SeekBar seekBar;
-    private Button btnPlayPause, btnRewind, btnForward, btnSpeed, btnRatio, btnInfo, btnCloseInfo, btnEpisodeList, btnNextEp, btnBack, btnDanmu, btnHdrToggle, btnQuality, btnPlayCenter;
+    private Button btnPlayPause, btnRewind, btnForward, btnSpeed, btnRatio, btnInfo, btnCloseInfo, btnEpisodeList, btnNextEp, btnBack, btnDanmu, btnHdrToggle, btnQuality, btnPlayCenter, btnPlayMode, btnScreenOff, btnQuickMenu;
+    private View vScreenOffOverlay;
+    private boolean isScreenOffMode = false;
+    private android.media.audiofx.LoudnessEnhancer loudnessEnhancer;
+    private int sleepTimerMinutes = 0;
+    private long sleepTimerEndTimeMs = 0;
     private ImageView btnLock;
     private TextView tvTitle, tvDanmuStatus, tvDanmuMatch, tvSpeedHint, infoTextAudio, infoTextExtra;
     private View llTopVideoInfoBanner;
@@ -206,6 +212,13 @@ public class PlayerActivity extends AppCompatActivity {
         infoText = findViewById(R.id.infoText);
         infoTextAudio = findViewById(R.id.infoTextAudio);
         infoTextExtra = findViewById(R.id.infoTextExtra);
+        btnPlayMode = findViewById(R.id.btnPlayMode);
+        btnScreenOff = findViewById(R.id.btnScreenOff);
+        btnQuickMenu = findViewById(R.id.btnQuickMenu);
+        vScreenOffOverlay = findViewById(R.id.vScreenOffOverlay);
+        if (vScreenOffOverlay != null) {
+            vScreenOffOverlay.setOnClickListener(v -> exitScreenOffMode());
+        }
 
         initPlayer();
 
@@ -292,6 +305,18 @@ public class PlayerActivity extends AppCompatActivity {
         btnPlayPause.setOnClickListener(v -> togglePlay());
         btnPlayCenter = findViewById(R.id.btnPlayCenter);
         if (btnPlayCenter != null) btnPlayCenter.setOnClickListener(v -> togglePlay());
+        int savedPlayMode = prefs.getInt("pref_play_mode", EpisodeManager.PLAY_MODE_SEQUENTIAL);
+        episodeManager.setPlayMode(savedPlayMode);
+        updatePlayModeBtn();
+        if (btnPlayMode != null) {
+            btnPlayMode.setOnClickListener(v -> cyclePlayMode());
+        }
+        if (btnScreenOff != null) {
+            btnScreenOff.setOnClickListener(v -> enterScreenOffMode());
+        }
+        if (btnQuickMenu != null) {
+            btnQuickMenu.setOnClickListener(v -> showQuickMenuPanel());
+        }
         seekStep = getSharedPreferences("fntv_prefs", MODE_PRIVATE).getInt("seek_step", 10) * 1000;
         btnRewind.setOnClickListener(v -> seekRel(-seekStep));
         btnForward.setOnClickListener(v -> seekRel(seekStep));
@@ -614,6 +639,7 @@ public class PlayerActivity extends AppCompatActivity {
                                                   long initializedTimestampMs) {
                 actualAudioDecoder = decoderName;
                 Log.d(TAG, "音频解码器: " + decoderName);
+                applyVocalBoost();
             }
         });
 
@@ -621,6 +647,7 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public void onPlaybackStateChanged(int s) {
                 tvBuffering.setVisibility(s == Player.STATE_BUFFERING ? View.VISIBLE : View.GONE);
                 if (s == Player.STATE_READY) {
+                    applyVocalBoost();
                     if (!seeked && seekTs > 0) {
                         long dMs = player.getDuration();
                         long durSec = itemDuration > 0 ? itemDuration : (dMs > 0 ? dMs / 1000 : 0);
@@ -663,6 +690,14 @@ public class PlayerActivity extends AppCompatActivity {
                     }
                 } else if (s == Player.STATE_ENDED) {
                     Log.d(TAG, "STATE_ENDED hasNext=" + (episodeManager != null && episodeManager.hasNext()));
+                    if (sleepTimerMinutes == -1) {
+                        sleepTimerMinutes = 0;
+                        Toast.makeText(PlayerActivity.this, "⏱️ 定时关闭：本视频播放结束，已停止播放", Toast.LENGTH_SHORT).show();
+                        if (player != null) player.setPlayWhenReady(false);
+                        restoreOrientation();
+                        finish();
+                        return;
+                    }
                     if (episodeManager != null && episodeManager.hasNext()) {
                         episodeManager.playNext();
                     }
@@ -952,6 +987,14 @@ public class PlayerActivity extends AppCompatActivity {
                     btnPlayPause.setText(player.isPlaying() ? "暂停" : "播放");
                     if (btnPlayCenter != null) btnPlayCenter.setText(player.isPlaying() ? "暂停" : "播放");
                 } else if (s == Player.STATE_ENDED) {
+                    if (sleepTimerMinutes == -1) {
+                        sleepTimerMinutes = 0;
+                        Toast.makeText(PlayerActivity.this, "⏱️ 定时关闭：本视频播放结束，已停止播放", Toast.LENGTH_SHORT).show();
+                        if (player != null) player.setPlayWhenReady(false);
+                        restoreOrientation();
+                        finish();
+                        return;
+                    }
                     if (episodeManager != null && episodeManager.hasNext()) episodeManager.playNext();
                 }
             }
@@ -1480,6 +1523,9 @@ public class PlayerActivity extends AppCompatActivity {
         if (controller.hasFocus() || btnDanmu.hasFocus() || btnLock.hasFocus()
                 || btnCloudMode.hasFocus() || btnBrightness.hasFocus() || btnSkip.hasFocus()
                 || btnInfo.hasFocus() || btnBack.hasFocus()
+                || (btnPlayMode != null && btnPlayMode.hasFocus())
+                || (btnScreenOff != null && btnScreenOff.hasFocus())
+                || (btnQuickMenu != null && btnQuickMenu.hasFocus())
                 || (btnHdrToggle != null && btnHdrToggle.hasFocus())
                 || (btnQuality != null && btnQuality.hasFocus())) {
             resetHideTimer();
@@ -1507,6 +1553,9 @@ public class PlayerActivity extends AppCompatActivity {
         btnCloudMode.setOnFocusChangeListener(l);
         if (btnBrightness != null) btnBrightness.setOnFocusChangeListener(l);
         if (btnSkip != null) btnSkip.setOnFocusChangeListener(l);
+        if (btnPlayMode != null) btnPlayMode.setOnFocusChangeListener(l);
+        if (btnScreenOff != null) btnScreenOff.setOnFocusChangeListener(l);
+        if (btnQuickMenu != null) btnQuickMenu.setOnFocusChangeListener(l);
         View btnAudioTrack = findViewById(R.id.btnAudioTrack);
         View btnSubtitleTrack = findViewById(R.id.btnSubtitleTrack);
         if (btnAudioTrack != null) btnAudioTrack.setOnFocusChangeListener(l);
@@ -1518,6 +1567,16 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void updateTime() {
         if (player == null) return;
+        // 睡眠倒计时 / 定时关闭检测
+        if (sleepTimerMinutes > 0 && sleepTimerEndTimeMs > 0 && System.currentTimeMillis() >= sleepTimerEndTimeMs) {
+            sleepTimerMinutes = 0;
+            sleepTimerEndTimeMs = 0;
+            Toast.makeText(this, "⏱️ 定时关闭时间已到，已停止播放", Toast.LENGTH_SHORT).show();
+            if (player != null) player.setPlayWhenReady(false);
+            restoreOrientation();
+            finish();
+            return;
+        }
         long cur = player.getCurrentPosition(), dur = player.getDuration();
         seekBar.setMax((int) Math.max(dur, 1));
         seekBar.setKeyProgressIncrement(5000); // 方向键每次 5 秒
@@ -1731,9 +1790,24 @@ public class PlayerActivity extends AppCompatActivity {
         });
     }
 
-    // ========== 按键 ==========
+    // ========== 按键与触摸 ==========
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (isScreenOffMode) {
+            if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+                exitScreenOffMode();
+            }
+            return true;
+        }
+        return super.dispatchTouchEvent(ev);
+    }
 
     @Override public boolean onKeyDown(int k, KeyEvent e) {
+        if (isScreenOffMode) {
+            exitScreenOffMode();
+            return true;
+        }
         if (isLocked) {
             if (k == KeyEvent.KEYCODE_BACK) {
                 if (btnLock.hasFocus() || controller.hasFocus()) {
@@ -1816,8 +1890,14 @@ public class PlayerActivity extends AppCompatActivity {
                         return true;
                     }
                     return super.onKeyDown(k, e);
-                case KeyEvent.KEYCODE_INFO: case KeyEvent.KEYCODE_MENU:
+                case KeyEvent.KEYCODE_INFO:
                     toggleInfo(); return true;
+                case KeyEvent.KEYCODE_MENU:
+                    if (getSharedPreferences("fntv_prefs", MODE_PRIVATE).getBoolean("pref_menu_panel", true)) {
+                        showQuickMenuPanel(); return true;
+                    } else {
+                        toggleInfo(); return true;
+                    }
             }
             return super.onKeyDown(k, e);
         } else {
@@ -1839,7 +1919,16 @@ public class PlayerActivity extends AppCompatActivity {
                     return true;
                 case KeyEvent.KEYCODE_DPAD_LEFT:
                 case KeyEvent.KEYCODE_DPAD_RIGHT: {
-                    long step = k == KeyEvent.KEYCODE_DPAD_LEFT ? -seekStep : seekStep;
+                    boolean dpadAccel = getSharedPreferences("fntv_prefs", MODE_PRIVATE).getBoolean("pref_dpad_accel", true);
+                    long curSeekStep = seekStep;
+                    if (dpadAccel) {
+                        int rep = e.getRepeatCount();
+                        if (rep >= 12) curSeekStep = 60000;
+                        else if (rep >= 6) curSeekStep = 30000;
+                        else if (rep >= 2) curSeekStep = 15000;
+                        else curSeekStep = 5000;
+                    }
+                    long step = k == KeyEvent.KEYCODE_DPAD_LEFT ? -curSeekStep : curSeekStep;
                     long cur = pendingSeekMs >= 0 ? pendingSeekMs : (player != null ? player.getCurrentPosition() : 0);
                     long dur = player != null ? player.getDuration() : 0;
                     long target = Math.max(0, Math.min(dur, cur + step));
@@ -1863,8 +1952,14 @@ public class PlayerActivity extends AppCompatActivity {
                     handler.postDelayed(seekCommitR, 1000);
                     return true;
                 }
-                case KeyEvent.KEYCODE_INFO: case KeyEvent.KEYCODE_MENU:
+                case KeyEvent.KEYCODE_INFO:
                     toggleInfo(); return true;
+                case KeyEvent.KEYCODE_MENU:
+                    if (getSharedPreferences("fntv_prefs", MODE_PRIVATE).getBoolean("pref_menu_panel", true)) {
+                        showQuickMenuPanel(); return true;
+                    } else {
+                        toggleInfo(); return true;
+                    }
             }
             return super.onKeyDown(k, e);
         }
@@ -2212,6 +2307,157 @@ public class PlayerActivity extends AppCompatActivity {
         saveProgress();
         if (player != null) player.setPlayWhenReady(false);
     }
+    // ========== 车载与播放增强特性 ==========
+
+    private void updatePlayModeBtn() {
+        if (btnPlayMode != null && episodeManager != null) {
+            btnPlayMode.setText(EpisodeManager.getPlayModeShortName(episodeManager.getPlayMode()));
+        }
+    }
+
+    private void cyclePlayMode() {
+        if (episodeManager != null) {
+            int newMode = episodeManager.cyclePlayMode();
+            getSharedPreferences("fntv_prefs", MODE_PRIVATE).edit().putInt("pref_play_mode", newMode).apply();
+            updatePlayModeBtn();
+            Toast.makeText(this, "播放模式：" + EpisodeManager.getPlayModeName(newMode), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void enterScreenOffMode() {
+        if (vScreenOffOverlay != null) {
+            vScreenOffOverlay.setVisibility(View.VISIBLE);
+            vScreenOffOverlay.bringToFront();
+            isScreenOffMode = true;
+            showCtrl(false);
+            Toast.makeText(this, "🌙 已开启息屏听歌模式，按任意键或触摸唤醒", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean exitScreenOffMode() {
+        if (isScreenOffMode) {
+            isScreenOffMode = false;
+            if (vScreenOffOverlay != null) {
+                vScreenOffOverlay.setVisibility(View.GONE);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void applyVocalBoost() {
+        boolean enabled = getSharedPreferences("fntv_prefs", MODE_PRIVATE).getBoolean("pref_vocal_boost", true);
+        if (player == null) return;
+        int sessionId = player.getAudioSessionId();
+        if (sessionId <= 0) return;
+        try {
+            if (loudnessEnhancer != null) {
+                try { loudnessEnhancer.release(); } catch (Exception ignored) {}
+                loudnessEnhancer = null;
+            }
+            if (enabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                loudnessEnhancer = new android.media.audiofx.LoudnessEnhancer(sessionId);
+                loudnessEnhancer.setTargetGain(600); // +6dB 动态人声增益
+                loudnessEnhancer.setEnabled(true);
+                Log.d(TAG, "LoudnessEnhancer applied to sessionId=" + sessionId);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "LoudnessEnhancer error: " + t.getMessage());
+        }
+    }
+
+    private void setSleepTimer(int minutes) {
+        this.sleepTimerMinutes = minutes;
+        if (minutes > 0) {
+            this.sleepTimerEndTimeMs = System.currentTimeMillis() + (long) minutes * 60 * 1000;
+            Toast.makeText(this, "⏱️ 定时关闭：" + minutes + " 分钟后自动停止播放", Toast.LENGTH_SHORT).show();
+        } else if (minutes == -1) {
+            this.sleepTimerEndTimeMs = 0;
+            Toast.makeText(this, "⏱️ 定时关闭：当前视频播放完毕后停止", Toast.LENGTH_SHORT).show();
+        } else {
+            this.sleepTimerEndTimeMs = 0;
+            Toast.makeText(this, "⏱️ 定时关闭已取消", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showSleepTimerPicker() {
+        String[] options = new String[]{"关闭", "15 分钟", "30 分钟", "60 分钟", "90 分钟", "播完本视频停止"};
+        int curIndex = 0;
+        if (sleepTimerMinutes == 15) curIndex = 1;
+        else if (sleepTimerMinutes == 30) curIndex = 2;
+        else if (sleepTimerMinutes == 60) curIndex = 3;
+        else if (sleepTimerMinutes == 90) curIndex = 4;
+        else if (sleepTimerMinutes == -1) curIndex = 5;
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("选择定时关闭时长")
+                .setSingleChoiceItems(options, curIndex, (d, which) -> {
+                    d.dismiss();
+                    switch (which) {
+                        case 0: setSleepTimer(0); break;
+                        case 1: setSleepTimer(15); break;
+                        case 2: setSleepTimer(30); break;
+                        case 3: setSleepTimer(60); break;
+                        case 4: setSleepTimer(90); break;
+                        case 5: setSleepTimer(-1); break;
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showQuickMenuPanel() {
+        boolean vocalBoost = getSharedPreferences("fntv_prefs", MODE_PRIVATE).getBoolean("pref_vocal_boost", true);
+        String playModeStr = EpisodeManager.getPlayModeName(episodeManager != null ? episodeManager.getPlayMode() : 0);
+        String sleepStr;
+        if (sleepTimerMinutes == 0) sleepStr = "关闭";
+        else if (sleepTimerMinutes == -1) sleepStr = "播完本项停止";
+        else {
+            long remainMin = Math.max(1, (sleepTimerEndTimeMs - System.currentTimeMillis()) / 60000);
+            sleepStr = remainMin + " 分钟后停止";
+        }
+
+        String[] items = new String[] {
+                "播放模式：" + playModeStr,
+                "🌙 息屏听歌（防眩目全黑模式）",
+                "车载对白增强：" + (vocalBoost ? "已开启 (+6dB)" : "已关闭"),
+                "⏱️ 定时关闭：" + sleepStr,
+                "播放倍速：" + speeds[speedIdx] + "x",
+                "画面比例切换"
+        };
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("车载与播放快捷控制")
+                .setItems(items, (dialog, which) -> {
+                    dialog.dismiss();
+                    switch (which) {
+                        case 0: // 播放模式
+                            cyclePlayMode();
+                            break;
+                        case 1: // 息屏
+                            enterScreenOffMode();
+                            break;
+                        case 2: // 对白增强
+                            boolean newVocal = !vocalBoost;
+                            getSharedPreferences("fntv_prefs", MODE_PRIVATE).edit().putBoolean("pref_vocal_boost", newVocal).apply();
+                            applyVocalBoost();
+                            Toast.makeText(PlayerActivity.this, "车载对白增强：" + (newVocal ? "已开启 (+6dB)" : "已关闭"), Toast.LENGTH_SHORT).show();
+                            break;
+                        case 3: // 定时关闭
+                            showSleepTimerPicker();
+                            break;
+                        case 4: // 倍速
+                            cycleSpeed();
+                            break;
+                        case 5: // 比例
+                            cycleRatio();
+                            break;
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     @Override protected void onDestroy() {
         if (isFolderPlaylist && folderGuid != null && !folderGuid.isEmpty() && player != null) {
             long curPos = player.getCurrentPosition();
@@ -2219,6 +2465,10 @@ public class PlayerActivity extends AppCompatActivity {
         }
         if (isFolderPlaylist) {
             PlaylistHolder.clear();
+        }
+        if (loudnessEnhancer != null) {
+            try { loudnessEnhancer.release(); } catch (Exception ignored) {}
+            loudnessEnhancer = null;
         }
         saveProgress();
         super.onDestroy(); handler.removeCallbacksAndMessages(null);

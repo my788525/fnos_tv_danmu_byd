@@ -21,6 +21,10 @@ import retrofit2.Response;
 /** 剧集列表管理 — 加载、切换剧集 */
 public class EpisodeManager {
 
+    public static final int PLAY_MODE_SEQUENTIAL = 0;
+    public static final int PLAY_MODE_SHUFFLE = 1;
+    public static final int PLAY_MODE_REPEAT_ONE = 2;
+
     public interface Callback {
         String getBaseUrl();
         String getParentGuid();
@@ -39,6 +43,7 @@ public class EpisodeManager {
     private int currentEpIndex = -1;
     private boolean loadingEpisodes = false;
     private boolean isCustomPlaylist = false;
+    private int playMode = PLAY_MODE_SEQUENTIAL;
     private String playlistTitle;
     private final Callback cb;
     private final Button btnEpisodeList;
@@ -52,6 +57,39 @@ public class EpisodeManager {
         this.cb = cb;
         this.btnEpisodeList = btnEpisodeList;
         this.btnNextEp = btnNextEp;
+    }
+
+    public int getPlayMode() {
+        return playMode;
+    }
+
+    public void setPlayMode(int mode) {
+        this.playMode = mode;
+        updateNextBtn();
+    }
+
+    public int cyclePlayMode() {
+        this.playMode = (this.playMode + 1) % 3;
+        updateNextBtn();
+        return this.playMode;
+    }
+
+    public static String getPlayModeName(int mode) {
+        switch (mode) {
+            case PLAY_MODE_SHUFFLE: return "🔀 随机播放";
+            case PLAY_MODE_REPEAT_ONE: return "🔂 单曲循环";
+            case PLAY_MODE_SEQUENTIAL:
+            default: return "🔁 列表循环";
+        }
+    }
+
+    public static String getPlayModeShortName(int mode) {
+        switch (mode) {
+            case PLAY_MODE_SHUFFLE: return "🔀 随机";
+            case PLAY_MODE_REPEAT_ONE: return "🔂 单曲";
+            case PLAY_MODE_SEQUENTIAL:
+            default: return "🔁 列表";
+        }
     }
 
     /** 设置自定义文件夹/文件列表播放列表 */
@@ -132,11 +170,23 @@ public class EpisodeManager {
         }
     }
 
-    /** 获取下一个视频/剧集项（若自定义列表支持循环，在末尾时返回第0项） */
+    /** 获取下一个视频/剧集项（若自定义列表支持循环，在末尾时返回第0项；若单曲循环返回当前项；若随机播放返回随机项） */
     public PlayListItem getNextEpisodeItem() {
         if (episodeList == null || episodeList.isEmpty()) return null;
         if (currentEpIndex < 0) {
             syncCurrentIndex();
+        }
+        if (playMode == PLAY_MODE_REPEAT_ONE) {
+            if (currentEpIndex >= 0 && currentEpIndex < episodeList.size()) {
+                return episodeList.get(currentEpIndex);
+            }
+        }
+        if (playMode == PLAY_MODE_SHUFFLE && episodeList.size() > 1) {
+            int randIdx = (int) (Math.random() * episodeList.size());
+            if (randIdx == currentEpIndex) {
+                randIdx = (randIdx + 1) % episodeList.size();
+            }
+            return episodeList.get(randIdx);
         }
         int nextIndex = currentEpIndex + 1;
         if (nextIndex >= episodeList.size()) {
@@ -158,6 +208,16 @@ public class EpisodeManager {
         if (currentEpIndex < 0) {
             syncCurrentIndex();
         }
+        if (playMode == PLAY_MODE_REPEAT_ONE) {
+            return currentEpIndex;
+        }
+        if (playMode == PLAY_MODE_SHUFFLE && episodeList.size() > 1) {
+            int randIdx = (int) (Math.random() * episodeList.size());
+            if (randIdx == currentEpIndex) {
+                randIdx = (randIdx + 1) % episodeList.size();
+            }
+            return randIdx;
+        }
         int nextIndex = currentEpIndex + 1;
         if (nextIndex >= episodeList.size()) {
             if (isCustomPlaylist) {
@@ -172,6 +232,7 @@ public class EpisodeManager {
     /** 是否有下一集/下一首 */
     public boolean hasNext() {
         if (episodeList == null || episodeList.isEmpty()) return false;
+        if (playMode == PLAY_MODE_REPEAT_ONE || playMode == PLAY_MODE_SHUFFLE) return true;
         if (isCustomPlaylist) return true; // 自定义文件夹播放列表支持列表循环连播
         return currentEpIndex >= 0 && currentEpIndex < episodeList.size() - 1;
     }
@@ -179,6 +240,7 @@ public class EpisodeManager {
     /** 是否有上一集/上一首 */
     public boolean hasPrev() {
         if (episodeList == null || episodeList.isEmpty()) return false;
+        if (playMode == PLAY_MODE_REPEAT_ONE || playMode == PLAY_MODE_SHUFFLE) return true;
         if (isCustomPlaylist) return true; // 自定义文件夹播放列表支持列表循环连播
         return currentEpIndex > 0 && currentEpIndex < episodeList.size();
     }
@@ -339,6 +401,31 @@ public class EpisodeManager {
     /** 播放下一个项目（下一集/下一首MV） */
     public void playNext() {
         if (!hasNext()) return;
+        if (playMode == PLAY_MODE_REPEAT_ONE) {
+            if (currentEpIndex >= 0 && currentEpIndex < episodeList.size()) {
+                PlayListItem cur = episodeList.get(currentEpIndex);
+                currentGuid = cur.guid;
+                currentTitle = cur.getDisplayTitle() != null ? cur.getDisplayTitle() : cur.title;
+                updateBtnText();
+                updateNextBtn();
+                cb.onSwitchEpisode(currentGuid, currentTitle);
+                return;
+            }
+        }
+        if (playMode == PLAY_MODE_SHUFFLE && episodeList.size() > 1) {
+            int randIdx = (int) (Math.random() * episodeList.size());
+            if (randIdx == currentEpIndex) {
+                randIdx = (randIdx + 1) % episodeList.size();
+            }
+            currentEpIndex = randIdx;
+            PlayListItem next = episodeList.get(currentEpIndex);
+            currentGuid = next.guid;
+            currentTitle = next.getDisplayTitle() != null ? next.getDisplayTitle() : next.title;
+            updateBtnText();
+            updateNextBtn();
+            cb.onSwitchEpisode(currentGuid, currentTitle);
+            return;
+        }
         int nextIndex = currentEpIndex + 1;
         if (nextIndex >= episodeList.size()) {
             if (isCustomPlaylist) {
@@ -359,6 +446,31 @@ public class EpisodeManager {
     /** 播放上一个项目（方向盘/遥控上键） */
     public void playPrev() {
         if (!hasPrev()) return;
+        if (playMode == PLAY_MODE_REPEAT_ONE) {
+            if (currentEpIndex >= 0 && currentEpIndex < episodeList.size()) {
+                PlayListItem cur = episodeList.get(currentEpIndex);
+                currentGuid = cur.guid;
+                currentTitle = cur.getDisplayTitle() != null ? cur.getDisplayTitle() : cur.title;
+                updateBtnText();
+                updateNextBtn();
+                cb.onSwitchEpisode(currentGuid, currentTitle);
+                return;
+            }
+        }
+        if (playMode == PLAY_MODE_SHUFFLE && episodeList.size() > 1) {
+            int randIdx = (int) (Math.random() * episodeList.size());
+            if (randIdx == currentEpIndex) {
+                randIdx = (randIdx + 1) % episodeList.size();
+            }
+            currentEpIndex = randIdx;
+            PlayListItem prev = episodeList.get(currentEpIndex);
+            currentGuid = prev.guid;
+            currentTitle = prev.getDisplayTitle() != null ? prev.getDisplayTitle() : prev.title;
+            updateBtnText();
+            updateNextBtn();
+            cb.onSwitchEpisode(currentGuid, currentTitle);
+            return;
+        }
         int prevIndex = currentEpIndex - 1;
         if (prevIndex < 0) {
             if (isCustomPlaylist) {

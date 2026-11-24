@@ -21,6 +21,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.fntv.app.api.FnApiManager;
 import com.fntv.app.api.model.*;
 import com.fntv.app.util.MediaSortHelper;
+import com.fntv.app.util.PinyinUtils;
 import com.fntv.app.util.SimpleImageLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -71,6 +72,12 @@ public class HomeActivity extends AppCompatActivity {
 
     private RelativeLayout rlViewModeSetting, rlSortFieldSetting, rlSortOrderSetting, rlFoldersFirstSetting, rlFolderHierarchySetting;
     private TextView tvViewModeValue, tvSortFieldValue, tvSortOrderValue, tvFoldersFirstValue, tvFolderHierarchyValue;
+
+    private RelativeLayout rlPlayModeSetting, rlScreenOffSetting, rlAutoResumeSetting, rlPinyinSearchSetting,
+            rlMenuPanelSetting, rlDpadAccelSetting, rlSleepTimerSetting, rlVocalBoostSetting;
+    private TextView tvPlayModeValue, tvScreenOffValue, tvAutoResumeValue, tvPinyinSearchValue,
+            tvMenuPanelValue, tvDpadAccelValue, tvSleepTimerValue, tvVocalBoostValue;
+    private boolean hasAutoResumedOnStartup = false;
 
     public static class FolderNavState {
         public String guid;
@@ -244,6 +251,23 @@ public class HomeActivity extends AppCompatActivity {
         tvFoldersFirstValue = findViewById(R.id.tvFoldersFirstValue);
         rlFolderHierarchySetting = findViewById(R.id.rlFolderHierarchySetting);
         tvFolderHierarchyValue = findViewById(R.id.tvFolderHierarchyValue);
+
+        rlPlayModeSetting = findViewById(R.id.rlPlayModeSetting);
+        tvPlayModeValue = findViewById(R.id.tvPlayModeValue);
+        rlScreenOffSetting = findViewById(R.id.rlScreenOffSetting);
+        tvScreenOffValue = findViewById(R.id.tvScreenOffValue);
+        rlAutoResumeSetting = findViewById(R.id.rlAutoResumeSetting);
+        tvAutoResumeValue = findViewById(R.id.tvAutoResumeValue);
+        rlPinyinSearchSetting = findViewById(R.id.rlPinyinSearchSetting);
+        tvPinyinSearchValue = findViewById(R.id.tvPinyinSearchValue);
+        rlMenuPanelSetting = findViewById(R.id.rlMenuPanelSetting);
+        tvMenuPanelValue = findViewById(R.id.tvMenuPanelValue);
+        rlDpadAccelSetting = findViewById(R.id.rlDpadAccelSetting);
+        tvDpadAccelValue = findViewById(R.id.tvDpadAccelValue);
+        rlSleepTimerSetting = findViewById(R.id.rlSleepTimerSetting);
+        tvSleepTimerValue = findViewById(R.id.tvSleepTimerValue);
+        rlVocalBoostSetting = findViewById(R.id.rlVocalBoostSetting);
+        tvVocalBoostValue = findViewById(R.id.tvVocalBoostValue);
 
         TextView tvVersion = findViewById(R.id.tvVersionName);
         try {
@@ -831,6 +855,18 @@ public class HomeActivity extends AppCompatActivity {
                     filteredList.add(item);
                 }
                 if (filteredList.isEmpty()) return;
+
+                // 启动应用自动继续播放（车机收音机式开机即播未完项）
+                if (!hasAutoResumedOnStartup && prefs.getBoolean("pref_auto_resume", true)) {
+                    hasAutoResumedOnStartup = true;
+                    PlayListItem firstItem = filteredList.get(0);
+                    if (firstItem != null && firstItem.guid != null) {
+                        Toast.makeText(HomeActivity.this, "🚗 开机自动续播：" + firstItem.getDisplayTitle(), Toast.LENGTH_SHORT).show();
+                        launchPlayer(firstItem.guid, firstItem.getDisplayTitle(), firstItem.tvTitle != null ? firstItem.tvTitle : "",
+                                firstItem.episodeNumber, firstItem.poster, firstItem.getCategoryLabel(),
+                                firstItem.ts, firstItem.duration, firstItem.parentGuid);
+                    }
+                }
 
                 // 找到继续观看占位容器
                 for (int i = 0; i < moviesContainer.getChildCount(); i++) {
@@ -2810,7 +2846,7 @@ public class HomeActivity extends AppCompatActivity {
         if (imm != null) imm.hideSoftInputFromWindow(etSearch.getWindowToken(), 0);
     }
 
-    private void performSearch(String query) {
+    private void performSearch(final String query) {
         if (query.isEmpty()) {
             clearSearch();
             return;
@@ -2819,6 +2855,8 @@ public class HomeActivity extends AppCompatActivity {
         libraryContainer.removeAllViews();
         tvLibraryLoading.setVisibility(View.VISIBLE);
         tvLibraryLoading.setText("搜索中...");
+
+        final boolean pinyinEnabled = prefs.getBoolean("pref_pinyin_search", true);
 
         SearchHelper.search(apiManager, query, new SearchHelper.SearchCallback() {
             @Override
@@ -2829,12 +2867,38 @@ public class HomeActivity extends AppCompatActivity {
 
             @Override
             public void onEmpty() {
+                if (pinyinEnabled && savedBrowseList != null && !savedBrowseList.isEmpty()) {
+                    List<PlayListItem> pinyinMatches = new ArrayList<>();
+                    for (PlayListItem item : savedBrowseList) {
+                        if (item != null && PinyinUtils.match(item.getDisplayTitle(), query)) {
+                            pinyinMatches.add(item);
+                        }
+                    }
+                    if (!pinyinMatches.isEmpty()) {
+                        tvLibraryLoading.setVisibility(View.GONE);
+                        showSearchResults(pinyinMatches);
+                        return;
+                    }
+                }
                 tvLibraryLoading.setVisibility(View.GONE);
                 showSearchEmpty();
             }
 
             @Override
             public void onError(String msg) {
+                if (pinyinEnabled && savedBrowseList != null && !savedBrowseList.isEmpty()) {
+                    List<PlayListItem> pinyinMatches = new ArrayList<>();
+                    for (PlayListItem item : savedBrowseList) {
+                        if (item != null && PinyinUtils.match(item.getDisplayTitle(), query)) {
+                            pinyinMatches.add(item);
+                        }
+                    }
+                    if (!pinyinMatches.isEmpty()) {
+                        tvLibraryLoading.setVisibility(View.GONE);
+                        showSearchResults(pinyinMatches);
+                        return;
+                    }
+                }
                 tvLibraryLoading.setVisibility(View.GONE);
                 tvLibraryEmpty.setText(msg);
                 tvLibraryEmpty.setVisibility(View.VISIBLE);
@@ -3064,6 +3128,165 @@ public class HomeActivity extends AppCompatActivity {
                         })
                         .setNegativeButton("取消", null)
                         .show();
+            });
+        }
+
+        // ========== 车载与播放体验增强设置 ==========
+
+        // 1. 播放模式实时切换
+        final String[] playModeLabels = {"🔁 列表循环 (默认)", "🔀 随机播放", "🔂 单曲循环"};
+        int savedPlayMode = prefs.getInt("pref_play_mode", 0);
+        if (tvPlayModeValue != null) {
+            tvPlayModeValue.setText(playModeLabels[Math.max(0, Math.min(2, savedPlayMode))]);
+        }
+        if (rlPlayModeSetting != null) {
+            rlPlayModeSetting.setOnClickListener(v -> {
+                int cur = prefs.getInt("pref_play_mode", 0);
+                new AlertDialog.Builder(this)
+                        .setTitle("播放模式设置")
+                        .setSingleChoiceItems(playModeLabels, cur, (dialog, which) -> {
+                            prefs.edit().putInt("pref_play_mode", which).apply();
+                            if (tvPlayModeValue != null) {
+                                tvPlayModeValue.setText(playModeLabels[which]);
+                            }
+                            dialog.dismiss();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+        }
+
+        // 2. 息屏听歌 / 纯音频防眩目模式
+        boolean screenOffEnabled = prefs.getBoolean("pref_screen_off_enabled", true);
+        if (tvScreenOffValue != null) {
+            tvScreenOffValue.setText(screenOffEnabled ? "已开启 (播放界面按🌙键纯黑)" : "已关闭");
+        }
+        if (rlScreenOffSetting != null) {
+            rlScreenOffSetting.setOnClickListener(v -> {
+                boolean cur = prefs.getBoolean("pref_screen_off_enabled", true);
+                boolean next = !cur;
+                prefs.edit().putBoolean("pref_screen_off_enabled", next).apply();
+                if (tvScreenOffValue != null) {
+                    tvScreenOffValue.setText(next ? "已开启 (播放界面按🌙键纯黑)" : "已关闭");
+                }
+            });
+        }
+
+        // 3. 启动应用自动继续播放
+        boolean autoResumeEnabled = prefs.getBoolean("pref_auto_resume", true);
+        if (tvAutoResumeValue != null) {
+            tvAutoResumeValue.setText(autoResumeEnabled ? "开机自动继续播放 (默认开启)" : "已关闭 (手动选择)");
+        }
+        if (rlAutoResumeSetting != null) {
+            rlAutoResumeSetting.setOnClickListener(v -> {
+                boolean cur = prefs.getBoolean("pref_auto_resume", true);
+                boolean next = !cur;
+                prefs.edit().putBoolean("pref_auto_resume", next).apply();
+                if (tvAutoResumeValue != null) {
+                    tvAutoResumeValue.setText(next ? "开机自动继续播放 (默认开启)" : "已关闭 (手动选择)");
+                }
+            });
+        }
+
+        // 4. 拼音首字母模糊搜索
+        boolean pinyinEnabled = prefs.getBoolean("pref_pinyin_search", true);
+        if (tvPinyinSearchValue != null) {
+            tvPinyinSearchValue.setText(pinyinEnabled ? "拼音首字母匹配 (如 ZJL 搜周杰伦)" : "仅精确匹配");
+        }
+        if (rlPinyinSearchSetting != null) {
+            rlPinyinSearchSetting.setOnClickListener(v -> {
+                boolean cur = prefs.getBoolean("pref_pinyin_search", true);
+                boolean next = !cur;
+                prefs.edit().putBoolean("pref_pinyin_search", next).apply();
+                if (tvPinyinSearchValue != null) {
+                    tvPinyinSearchValue.setText(next ? "拼音首字母匹配 (如 ZJL 搜周杰伦)" : "仅精确匹配");
+                }
+            });
+        }
+
+        // 5. 遥控器菜单键 (Menu) 快速呼出控制面板
+        boolean menuPanelEnabled = prefs.getBoolean("pref_menu_panel", true);
+        if (tvMenuPanelValue != null) {
+            tvMenuPanelValue.setText(menuPanelEnabled ? "呼出控制面板 (推荐)" : "切换视频详细信息");
+        }
+        if (rlMenuPanelSetting != null) {
+            rlMenuPanelSetting.setOnClickListener(v -> {
+                boolean cur = prefs.getBoolean("pref_menu_panel", true);
+                boolean next = !cur;
+                prefs.edit().putBoolean("pref_menu_panel", next).apply();
+                if (tvMenuPanelValue != null) {
+                    tvMenuPanelValue.setText(next ? "呼出控制面板 (推荐)" : "切换视频详细信息");
+                }
+            });
+        }
+
+        // 6. 长按方向键左右平滑递增加速快进
+        boolean dpadAccelEnabled = prefs.getBoolean("pref_dpad_accel", true);
+        if (tvDpadAccelValue != null) {
+            tvDpadAccelValue.setText(dpadAccelEnabled ? "平滑递增 (5s/15s/30s/60s)" : "固定步长");
+        }
+        if (rlDpadAccelSetting != null) {
+            rlDpadAccelSetting.setOnClickListener(v -> {
+                boolean cur = prefs.getBoolean("pref_dpad_accel", true);
+                boolean next = !cur;
+                prefs.edit().putBoolean("pref_dpad_accel", next).apply();
+                if (tvDpadAccelValue != null) {
+                    tvDpadAccelValue.setText(next ? "平滑递增 (5s/15s/30s/60s)" : "固定步长");
+                }
+            });
+        }
+
+        // 7. 睡眠倒计时 / 定时关闭默认设置
+        final String[] sleepTimerOptions = {"关闭", "15 分钟", "30 分钟", "60 分钟", "90 分钟", "播完本项停止"};
+        final int[] sleepTimerValues = {0, 15, 30, 60, 90, -1};
+        int savedSleepTimer = prefs.getInt("pref_sleep_timer_default", 0);
+        int sleepTimerIdx = 0;
+        for (int i = 0; i < sleepTimerValues.length; i++) {
+            if (sleepTimerValues[i] == savedSleepTimer) {
+                sleepTimerIdx = i;
+                break;
+            }
+        }
+        if (tvSleepTimerValue != null) {
+            tvSleepTimerValue.setText(sleepTimerOptions[sleepTimerIdx]);
+        }
+        if (rlSleepTimerSetting != null) {
+            rlSleepTimerSetting.setOnClickListener(v -> {
+                int cur = prefs.getInt("pref_sleep_timer_default", 0);
+                int sel = 0;
+                for (int i = 0; i < sleepTimerValues.length; i++) {
+                    if (sleepTimerValues[i] == cur) {
+                        sel = i;
+                        break;
+                    }
+                }
+                new AlertDialog.Builder(this)
+                        .setTitle("定时关闭默认设置")
+                        .setSingleChoiceItems(sleepTimerOptions, sel, (dialog, which) -> {
+                            prefs.edit().putInt("pref_sleep_timer_default", sleepTimerValues[which]).apply();
+                            if (tvSleepTimerValue != null) {
+                                tvSleepTimerValue.setText(sleepTimerOptions[which]);
+                            }
+                            dialog.dismiss();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+        }
+
+        // 8. 车载人声对白增强 (动态增益中频对白)
+        boolean vocalBoostEnabled = prefs.getBoolean("pref_vocal_boost", true);
+        if (tvVocalBoostValue != null) {
+            tvVocalBoostValue.setText(vocalBoostEnabled ? "已开启 (+6dB 消除路噪增强对白)" : "已关闭");
+        }
+        if (rlVocalBoostSetting != null) {
+            rlVocalBoostSetting.setOnClickListener(v -> {
+                boolean cur = prefs.getBoolean("pref_vocal_boost", true);
+                boolean next = !cur;
+                prefs.edit().putBoolean("pref_vocal_boost", next).apply();
+                if (tvVocalBoostValue != null) {
+                    tvVocalBoostValue.setText(next ? "已开启 (+6dB 消除路噪增强对白)" : "已关闭");
+                }
             });
         }
 
